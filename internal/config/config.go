@@ -14,7 +14,8 @@ import (
 
 // Load reads and merges configuration from user-level and repo-level JSONC files.
 // Resolution order: user config (~/.config/otto/otto.jsonc) → deep-merged with repo config (.otto/otto.jsonc).
-func Load() (*Config, error) {
+// An optional overridePath loads an additional layer that takes precedence over all file-based configs.
+func Load(overridePath ...string) (*Config, error) {
 	cfg := DefaultConfig()
 
 	// Load user-level config
@@ -36,6 +37,17 @@ func Load() (*Config, error) {
 			if err := mergeIntoConfig(&cfg, repoMap); err != nil {
 				return nil, fmt.Errorf("merging repo config: %w", err)
 			}
+		}
+	}
+
+	// Load --config override (highest file precedence)
+	if len(overridePath) > 0 && overridePath[0] != "" {
+		if overrideMap, err := loadJSONC(overridePath[0]); err == nil {
+			if err := mergeIntoConfig(&cfg, overrideMap); err != nil {
+				return nil, fmt.Errorf("merging override config: %w", err)
+			}
+		} else {
+			return nil, fmt.Errorf("loading override config %q: %w", overridePath[0], err)
 		}
 	}
 

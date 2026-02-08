@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# copilot dialogs
+.specstory
+
+# Otto binary
+otto
+/bin/
+
+# Vendor
+vendor/
+
+# Otto runtime
+.otto/logs/

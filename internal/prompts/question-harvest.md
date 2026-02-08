@@ -8,6 +8,14 @@ The following are the complete dialog logs from task executions in the most rece
 
 {{.execution_logs}}
 
+{{if .phase_summaries}}
+## Prior Phase Summaries
+
+Context from previously completed phases:
+
+{{.phase_summaries}}
+{{end}}
+
 ## Your Job
 
 Scan these logs carefully for:

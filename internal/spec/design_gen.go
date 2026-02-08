@@ -11,8 +11,8 @@ import (
 	"github.com/alanmeadows/otto/internal/store"
 )
 
-// SpecResearch generates or refines the research document for a spec.
-func SpecResearch(
+// SpecDesign generates or refines the design document for a spec.
+func SpecDesign(
 	ctx context.Context,
 	client opencode.LLMClient,
 	cfg *config.Config,
@@ -24,17 +24,16 @@ func SpecResearch(
 		return err
 	}
 
-	if err := CheckPrerequisites(spec, "research"); err != nil {
+	if err := CheckPrerequisites(spec, "design"); err != nil {
 		return err
 	}
 
-	// Read requirements (guaranteed to exist by prerequisites)
+	// Read all existing artifacts
 	requirementsMD := readArtifact(spec.RequirementsPath)
-
-	// Read optional existing artifacts
-	existingResearchMD := readArtifact(spec.ResearchPath)
-	designMD := readArtifact(spec.DesignPath)
+	researchMD := readArtifact(spec.ResearchPath)
+	existingDesignMD := readArtifact(spec.DesignPath)
 	tasksMD := readArtifact(spec.TasksPath)
+	questionsMD := readArtifact(spec.QuestionsPath)
 
 	summary, err := AnalyzeCodebase(repoDir)
 	if err != nil {
@@ -44,27 +43,29 @@ func SpecResearch(
 	// Build data map for template
 	data := map[string]string{
 		"requirements_md":  requirementsMD,
+		"research_md":      researchMD,
 		"codebase_summary": summary.String(),
 	}
-	if existingResearchMD != "" {
-		data["existing_research_md"] = existingResearchMD
-	}
-	if designMD != "" {
-		data["design_md"] = designMD
+	if existingDesignMD != "" {
+		data["existing_design_md"] = existingDesignMD
 	}
 	if tasksMD != "" {
 		data["tasks_md"] = tasksMD
 	}
+	if questionsMD != "" {
+		data["questions_md"] = questionsMD
+	}
 
-	rendered, err := prompts.Execute("research.md", data)
+	rendered, err := prompts.Execute("design.md", data)
 	if err != nil {
-		return fmt.Errorf("rendering research prompt: %w", err)
+		return fmt.Errorf("rendering design prompt: %w", err)
 	}
 
 	pipeline := buildReviewPipeline(client, repoDir, cfg)
 
 	contextData := map[string]string{
 		"Requirements": requirementsMD,
+		"Research":     researchMD,
 	}
 	if summary.String() != "" {
 		contextData["Codebase Summary"] = summary.String()
@@ -75,10 +76,10 @@ func SpecResearch(
 		return fmt.Errorf("review pipeline: %w", err)
 	}
 
-	if err := store.WriteBody(spec.ResearchPath, result); err != nil {
-		return fmt.Errorf("writing research: %w", err)
+	if err := store.WriteBody(spec.DesignPath, result); err != nil {
+		return fmt.Errorf("writing design: %w", err)
 	}
 
-	slog.Info("research updated", "spec", spec.Slug)
+	slog.Info("design updated", "spec", spec.Slug)
 	return nil
 }

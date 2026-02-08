@@ -26,6 +26,14 @@ The existing codebase has established conventions. Every task description must i
 {{.existing_tasks_md}}
 {{end}}
 
+{{if .phase_summaries}}
+### Phase Summaries
+
+Summaries from previously completed execution phases. Use these to understand what has already been implemented and adjust task descriptions accordingly.
+
+{{.phase_summaries}}
+{{end}}
+
 ---
 
 ## Task Sizing

@@ -82,3 +82,118 @@ func TestExecuteWithEmptyData(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, len(strings.TrimSpace(result)) > 0)
 }
+
+// TestExecuteAllTemplatesWithFullData parses every template with all variables
+// populated, asserts no parse errors, and verifies the output contains the
+// substituted values.
+func TestExecuteAllTemplatesWithFullData(t *testing.T) {
+	// Full data map with every known template variable set to a unique non-empty string.
+	fullData := map[string]string{
+		"requirements_md":      "REQUIREMENTS_CONTENT_PLACEHOLDER",
+		"research_md":          "RESEARCH_CONTENT_PLACEHOLDER",
+		"design_md":            "DESIGN_CONTENT_PLACEHOLDER",
+		"existing_design_md":   "EXISTING_DESIGN_PLACEHOLDER",
+		"existing_research_md": "EXISTING_RESEARCH_PLACEHOLDER",
+		"existing_tasks_md":    "EXISTING_TASKS_PLACEHOLDER",
+		"questions_md":         "QUESTIONS_CONTENT_PLACEHOLDER",
+		"existing_artifacts":   "EXISTING_ARTIFACTS_PLACEHOLDER",
+		"codebase_summary":     "CODEBASE_SUMMARY_PLACEHOLDER",
+		"artifact":             "ARTIFACT_CONTENT_PLACEHOLDER",
+		"context":              "CONTEXT_CONTENT_PLACEHOLDER",
+		"execution_logs":       "EXECUTION_LOGS_PLACEHOLDER",
+		"phase_number":         "PHASE_NUMBER_PLACEHOLDER",
+		"phase_summaries":      "PHASE_SUMMARIES_PLACEHOLDER",
+		"pr_title":             "PR_TITLE_PLACEHOLDER",
+		"pr_description":       "PR_DESCRIPTION_PLACEHOLDER",
+		"target_branch":        "TARGET_BRANCH_PLACEHOLDER",
+		"comment_author":       "COMMENT_AUTHOR_PLACEHOLDER",
+		"comment_file":         "COMMENT_FILE_PLACEHOLDER",
+		"comment_line":         "COMMENT_LINE_PLACEHOLDER",
+		"comment_body":         "COMMENT_BODY_PLACEHOLDER",
+		"comment_thread":       "COMMENT_THREAD_PLACEHOLDER",
+		"code_context":         "CODE_CONTEXT_PLACEHOLDER",
+		"tasks_md":             "TASKS_MD_PLACEHOLDER",
+		"question":             "QUESTION_PLACEHOLDER",
+		"spec_context":         "SPEC_CONTEXT_PLACEHOLDER",
+	}
+
+	// Per-template expected variables: which placeholders should appear in the output.
+	templateExpected := map[string][]string{
+		"requirements.md": {
+			"REQUIREMENTS_CONTENT_PLACEHOLDER",
+			"QUESTIONS_CONTENT_PLACEHOLDER",
+			"CODEBASE_SUMMARY_PLACEHOLDER",
+			"EXISTING_ARTIFACTS_PLACEHOLDER",
+		},
+		"research.md": {
+			"REQUIREMENTS_CONTENT_PLACEHOLDER",
+			"CODEBASE_SUMMARY_PLACEHOLDER",
+			"EXISTING_RESEARCH_PLACEHOLDER",
+		},
+		"design.md": {
+			"REQUIREMENTS_CONTENT_PLACEHOLDER",
+			"RESEARCH_CONTENT_PLACEHOLDER",
+			"CODEBASE_SUMMARY_PLACEHOLDER",
+			"EXISTING_DESIGN_PLACEHOLDER",
+			"TASKS_MD_PLACEHOLDER",
+			"QUESTIONS_CONTENT_PLACEHOLDER",
+		},
+		"tasks.md": {
+			"REQUIREMENTS_CONTENT_PLACEHOLDER",
+			"RESEARCH_CONTENT_PLACEHOLDER",
+			"DESIGN_CONTENT_PLACEHOLDER",
+			"CODEBASE_SUMMARY_PLACEHOLDER",
+			"EXISTING_TASKS_PLACEHOLDER",
+			"PHASE_SUMMARIES_PLACEHOLDER",
+		},
+		"review.md": {
+			"ARTIFACT_CONTENT_PLACEHOLDER",
+			"CONTEXT_CONTENT_PLACEHOLDER",
+		},
+		"phase-review.md": {
+			"PHASE_SUMMARIES_PLACEHOLDER",
+		},
+		"question-harvest.md": {
+			"EXECUTION_LOGS_PLACEHOLDER",
+			"PHASE_NUMBER_PLACEHOLDER",
+			"PHASE_SUMMARIES_PLACEHOLDER",
+		},
+		"question-resolve.md": {
+			"QUESTION_PLACEHOLDER",
+			"CONTEXT_CONTENT_PLACEHOLDER",
+			"SPEC_CONTEXT_PLACEHOLDER",
+		},
+		"pr-review.md": {
+			"PR_TITLE_PLACEHOLDER",
+			"PR_DESCRIPTION_PLACEHOLDER",
+			"TARGET_BRANCH_PLACEHOLDER",
+			"CODEBASE_SUMMARY_PLACEHOLDER",
+		},
+		"pr-comment-respond.md": {
+			"PR_TITLE_PLACEHOLDER",
+			"PR_DESCRIPTION_PLACEHOLDER",
+			"COMMENT_AUTHOR_PLACEHOLDER",
+			"COMMENT_FILE_PLACEHOLDER",
+			"COMMENT_LINE_PLACEHOLDER",
+			"COMMENT_BODY_PLACEHOLDER",
+			"COMMENT_THREAD_PLACEHOLDER",
+			"CODE_CONTEXT_PLACEHOLDER",
+		},
+	}
+
+	for _, name := range expectedTemplates {
+		t.Run(name, func(t *testing.T) {
+			result, err := Execute(name, fullData)
+			require.NoError(t, err, "template %s failed to execute", name)
+			assert.NotEmpty(t, result, "template %s produced empty output", name)
+
+			// Check that expected substitutions appear in the output.
+			expected, ok := templateExpected[name]
+			require.True(t, ok, "no expected variables defined for template %s", name)
+			for _, placeholder := range expected {
+				assert.Contains(t, result, placeholder,
+					"template %s should contain substituted value %q", name, placeholder)
+			}
+		})
+	}
+}

@@ -13,6 +13,14 @@ Review ALL uncommitted changes in the working directory. Focus on:
 5. **Test quality** — are tests actually testing the right things? Are important cases missing?
 6. **Integration issues** — do the parallel changes work together? Interface mismatches, import issues, type conflicts
 
+{{if .phase_summaries}}
+## Prior Phase Summaries
+
+The following phases have already been completed and committed. Use this context to understand the overall progress and check for consistency with prior work.
+
+{{.phase_summaries}}
+{{end}}
+
 ## What NOT To Do
 
 - Do not refactor working code for style preferences

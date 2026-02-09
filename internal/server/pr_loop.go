@@ -13,6 +13,8 @@ import (
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/opencode"
 	"github.com/alanmeadows/otto/internal/provider"
+	"github.com/alanmeadows/otto/internal/provider/ado"
+	ghbackend "github.com/alanmeadows/otto/internal/provider/github"
 	"github.com/alanmeadows/otto/internal/repo"
 	"github.com/alanmeadows/otto/internal/store"
 )
@@ -204,6 +206,12 @@ func InferPR() (*PRDocument, error) {
 func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) error {
 	slog.Info("starting PR fix", "prID", pr.ID, "attempt", pr.FixAttempts+1)
 
+	// Set status to "fixing" to prevent concurrent fix attempts.
+	pr.Status = "fixing"
+	if err := SavePR(pr); err != nil {
+		return fmt.Errorf("setting fix status: %w", err)
+	}
+
 	// Map PR to local worktree.
 	workDir, cleanup, err := repo.MapPRToWorkDir(cfg, pr.URL, pr.Branch)
 	if err != nil {
@@ -384,4 +392,143 @@ func gitCommitAndPush(ctx context.Context, workDir, message string) (string, err
 	}
 
 	return hash[:8], nil
+}
+
+// RunMonitorLoop runs the PR monitoring loop that polls for PR status changes.
+// It blocks until the context is cancelled.
+func RunMonitorLoop(ctx context.Context, cfg *config.Config, serverMgr *opencode.ServerManager) error {
+	pollInterval := cfg.Server.ParsePollInterval()
+	slog.Info("starting PR monitoring loop", "interval", pollInterval)
+
+	// Build provider registry from config.
+	reg := buildMonitorRegistry(cfg)
+
+	ticker := time.NewTicker(pollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			slog.Info("monitoring loop stopped")
+			return nil
+		case <-ticker.C:
+			pollAllPRs(ctx, reg, serverMgr, cfg)
+		}
+	}
+}
+
+// buildMonitorRegistry creates a provider registry from config (server-side).
+func buildMonitorRegistry(cfg *config.Config) *provider.Registry {
+	reg := provider.NewRegistry()
+	if cfg.PR.Providers != nil {
+		if adoCfg, ok := cfg.PR.Providers["ado"]; ok {
+			auth := ado.NewAuthProvider(adoCfg.PAT)
+			adoBackend := ado.NewBackend(adoCfg.Organization, adoCfg.Project, auth)
+			reg.Register(adoBackend)
+		}
+		if ghCfg, ok := cfg.PR.Providers["github"]; ok {
+			ghBack := ghbackend.NewBackend("", "", ghCfg.Token)
+			reg.Register(ghBack)
+		}
+	}
+	return reg
+}
+
+// pollAllPRs processes all tracked PRs in a single poll cycle.
+func pollAllPRs(ctx context.Context, reg *provider.Registry, serverMgr *opencode.ServerManager, cfg *config.Config) {
+	prs, err := ListPRs()
+	if err != nil {
+		slog.Error("failed to list PRs", "error", err)
+		return
+	}
+
+	for _, pr := range prs {
+		if pr.Status != "watching" {
+			continue
+		}
+
+		if err := pollSinglePR(ctx, pr, reg, serverMgr, cfg); err != nil {
+			slog.Error("failed to poll PR", "prID", pr.ID, "error", err)
+		}
+	}
+}
+
+// pollSinglePR handles a single PR check in the monitoring loop.
+func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+	backend, err := reg.Get(pr.Provider)
+	if err != nil {
+		return fmt.Errorf("getting backend for %s: %w", pr.Provider, err)
+	}
+
+	prInfo := &provider.PRInfo{
+		ID:           pr.ID,
+		URL:          pr.URL,
+		RepoID:       pr.Repo,
+		SourceBranch: pr.Branch,
+		TargetBranch: pr.Target,
+	}
+
+	// 1. Check pipeline status.
+	status, err := backend.GetPipelineStatus(ctx, prInfo)
+	if err != nil {
+		slog.Warn("failed to get pipeline status", "prID", pr.ID, "error", err)
+	} else {
+		switch status.State {
+		case "succeeded":
+			pr.Status = "green"
+			pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
+			_ = backend.PostComment(ctx, prInfo, "otto: All pipelines passed! ✅")
+			return SavePR(pr)
+
+		case "failed":
+			slog.Info("pipeline failed, attempting fix", "prID", pr.ID)
+			if pr.FixAttempts < pr.MaxFixAttempts {
+				if fixErr := FixPR(ctx, pr, backend, serverMgr, cfg); fixErr != nil {
+					slog.Error("fix attempt failed", "prID", pr.ID, "error", fixErr)
+				}
+			} else {
+				slog.Warn("max fix attempts reached", "prID", pr.ID)
+			}
+		}
+	}
+
+	// 2. Check for new comments.
+	newCommentCount := 0
+	comments, err := backend.GetComments(ctx, prInfo)
+	if err != nil {
+		slog.Warn("failed to get comments", "prID", pr.ID, "error", err)
+	} else {
+		seenSet := make(map[string]bool)
+		for _, id := range pr.SeenCommentIDs {
+			seenSet[id] = true
+		}
+
+		for _, comment := range comments {
+			if seenSet[comment.ID] || comment.IsResolved {
+				continue
+			}
+
+			slog.Info("processing new comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
+			if err := evaluateComment(ctx, pr, comment, backend, serverMgr, cfg); err != nil {
+				slog.Error("failed to evaluate comment", "prID", pr.ID, "commentID", comment.ID, "error", err)
+			}
+			newCommentCount++
+		}
+
+		// Reload PR from disk to get updates from evaluateComment.
+		reloaded, loadErr := LoadPR(pr.Provider, pr.ID)
+		if loadErr != nil {
+			slog.Warn("failed to reload PR after comments", "error", loadErr)
+		} else {
+			pr = reloaded
+		}
+	}
+
+	// 3. ADO MerlinBot handling — only when new comments found.
+	if pr.Provider == "ado" && newCommentCount > 0 {
+		_ = backend.RunWorkflow(ctx, prInfo, provider.WorkflowAddressBot)
+	}
+
+	pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
+	return SavePR(pr)
 }

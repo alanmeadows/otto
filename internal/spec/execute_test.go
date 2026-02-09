@@ -595,7 +595,7 @@ func TestExecute_PhaseCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify a commit was made with "otto: phase" in the message.
-	cmd := exec.Command("git", "log", "--oneline", "-1")
+	cmd := exec.Command("git", "log", "--oneline")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	require.NoError(t, err)

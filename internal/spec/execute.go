@@ -75,6 +75,8 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 		maxRetries = 0
 	}
 
+	phasesExecuted := 0
+
 	for phaseIdx, phase := range phases {
 		phaseNum := phase[0].ParallelGroup
 
@@ -125,6 +127,9 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 
 		// Phase commit (task 4.1e).
 		committed := commitPhase(repoDir, phaseNum, phase)
+		if committed {
+			phasesExecuted++
+		}
 
 		// Summary chaining (task 4.5).
 		if committed {
@@ -144,7 +149,9 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 	}
 
 	// Documentation alignment (task 4.8) — runs once after all phases complete.
-	alignDocumentation(ctx, client, cfg, repoDir, spec)
+	if phasesExecuted > 0 {
+		alignDocumentation(ctx, client, cfg, repoDir, spec)
+	}
 
 	fmt.Fprintf(os.Stderr, "\n✓ Execution complete\n")
 	return nil
@@ -348,7 +355,7 @@ func reviewPhase(
 	phaseSummaries := readPhaseSummaries(spec)
 
 	data := map[string]string{
-		"phase_summaries":    phaseSummaries,
+		"phase_summaries":     phaseSummaries,
 		"uncommitted_changes": diff,
 	}
 

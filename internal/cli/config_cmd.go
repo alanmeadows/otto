@@ -40,12 +40,15 @@ var configShowCmd = &cobra.Command{
 			}
 		}
 
+		// Redact secrets before display.
+		redacted := redactConfig(cfg)
+
 		var data []byte
 		var err error
 		if configJSONFlag {
-			data, err = json.Marshal(cfg)
+			data, err = json.Marshal(redacted)
 		} else {
-			data, err = json.MarshalIndent(cfg, "", "  ")
+			data, err = json.MarshalIndent(redacted, "", "  ")
 		}
 		if err != nil {
 			return fmt.Errorf("marshaling config: %w", err)
@@ -54,6 +57,38 @@ var configShowCmd = &cobra.Command{
 		fmt.Fprintln(cmd.OutOrStdout(), string(data))
 		return nil
 	},
+}
+
+// redactConfig returns a copy of the config with secret fields masked.
+func redactConfig(cfg *config.Config) *config.Config {
+	copy := *cfg
+
+	// Redact notification webhook URL.
+	if copy.Notifications.TeamsWebhookURL != "" {
+		copy.Notifications.TeamsWebhookURL = "***"
+	}
+
+	// Redact provider tokens/PATs.
+	if copy.PR.Providers != nil {
+		redacted := make(map[string]config.ProviderConfig, len(copy.PR.Providers))
+		for k, v := range copy.PR.Providers {
+			if v.PAT != "" {
+				v.PAT = "***"
+			}
+			if v.Token != "" {
+				v.Token = "***"
+			}
+			redacted[k] = v
+		}
+		copy.PR.Providers = redacted
+	}
+
+	// Redact OpenCode password.
+	if copy.OpenCode.Password != "" {
+		copy.OpenCode.Password = "***"
+	}
+
+	return &copy
 }
 
 var configSetCmd = &cobra.Command{

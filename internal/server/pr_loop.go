@@ -341,6 +341,19 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 	if pr.FixAttempts >= pr.MaxFixAttempts {
 		pr.Status = "failed"
 		_ = backend.PostComment(ctx, prInfo, fmt.Sprintf("otto: Exhausted %d fix attempts for this PR. Manual intervention required.", pr.MaxFixAttempts))
+		// Notification ownership: FixPR is the sole owner of EventPRFailed notifications.
+		// pollSinglePR must NOT send duplicate failure notifications.
+		if err := Notify(ctx, &cfg.Notifications, NotificationPayload{
+			Event:       EventPRFailed,
+			Title:       pr.Title,
+			URL:         pr.URL,
+			Status:      "failed",
+			FixAttempts: pr.FixAttempts,
+			MaxAttempts: pr.MaxFixAttempts,
+			Error:       "Exhausted fix attempts",
+		}); err != nil {
+			slog.Warn("failed to send PR failed notification", "prID", pr.ID, "error", err)
+		}
 	} else {
 		pr.Status = "watching"
 	}
@@ -478,6 +491,14 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 			pr.Status = "green"
 			pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
 			_ = backend.PostComment(ctx, prInfo, "otto: All pipelines passed! ✅")
+			if err := Notify(ctx, &cfg.Notifications, NotificationPayload{
+				Event:  EventPRGreen,
+				Title:  pr.Title,
+				URL:    pr.URL,
+				Status: "green",
+			}); err != nil {
+				slog.Warn("failed to send PR green notification", "prID", pr.ID, "error", err)
+			}
 			return SavePR(pr)
 
 		case "failed":
@@ -527,6 +548,18 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 	// 3. ADO MerlinBot handling — only when new comments found.
 	if pr.Provider == "ado" && newCommentCount > 0 {
 		_ = backend.RunWorkflow(ctx, prInfo, provider.WorkflowAddressBot)
+	}
+
+	// 4. Notify if comments were handled.
+	if newCommentCount > 0 {
+		if err := Notify(ctx, &cfg.Notifications, NotificationPayload{
+			Event: EventCommentHandled,
+			Title: pr.Title,
+			URL:   pr.URL,
+			Extra: map[string]string{"comments_handled": fmt.Sprintf("%d", newCommentCount)},
+		}); err != nil {
+			slog.Warn("failed to send comment handled notification", "prID", pr.ID, "error", err)
+		}
 	}
 
 	pr.LastChecked = time.Now().UTC().Format(time.RFC3339)

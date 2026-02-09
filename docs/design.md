@@ -84,6 +84,7 @@ All LLM prompts are stored as **markdown files** in the codebase at `internal/pr
 | `design.md` | `otto spec design` | Architecture and implementation design |
 | `tasks.md` | `otto spec task generate` | Task decomposition with parallel grouping |
 | `review.md` | Multi-model review pipeline | Critical review of any artifact |
+| `task-briefing.md` | `otto spec execute` | Pre-execution task context distillation |
 | `phase-review.md` | `otto spec execute` | Inter-phase review gate |
 | `external-assumptions.md` | `otto spec execute` | Post-review external assumption validation & repair (primary model) |
 | `domain-hardening.md` | `otto spec execute` | Post-review domain hardening & polishing (primary model) |
@@ -115,6 +116,12 @@ Common variables:
 | `{{.artifact}}` | The artifact under review (for review.md) |
 | `{{.context}}` | Upstream context for review |
 | `{{.execution_logs}}` | Dialog logs from task executions |
+| `{{.task_id}}` | Target task ID (for task-briefing.md) |
+| `{{.task_title}}` | Target task title (for task-briefing.md) |
+| `{{.task_description}}` | Target task description (for task-briefing.md) |
+| `{{.task_files}}` | Files the target task will create/modify (for task-briefing.md) |
+| `{{.task_depends_on}}` | Task IDs the target task depends on (for task-briefing.md) |
+| `{{.tasks_md}}` | Full contents of the spec's tasks.md (for task-briefing.md) |
 | `{{.phase_number}}` | Current phase number |
 | `{{.pr_title}}` | PR title (for pr-review and pr-comment-respond) |
 | `{{.pr_description}}` | PR description body |
@@ -330,7 +337,8 @@ Arrays are **replaced**, not merged — e.g., if repo config defines `repos`, it
   "spec": {
     "max_parallel_tasks": 4,                 // Concurrent task execution limit
     "task_timeout": "30m",                   // Per-task timeout
-    "max_task_retries": 15                   // Max retry attempts per failed task
+    "max_task_retries": 15,                  // Max retry attempts per failed task
+    "task_briefing": true                    // Pre-execution task briefing via LLM (default: true)
   }
 }
 ```
@@ -523,6 +531,7 @@ Otto deletes OpenCode sessions after they are no longer needed — but **only af
 
 | Context | Cleanup Behavior |
 |---------|-----------------|
+| Task briefing | Session deleted immediately after brief is generated |
 | Task execution | Session deleted **after** dialog log is extracted for question harvesting and run summary |
 | Phase review gate | Session deleted after review feedback is captured |
 | External assumptions validation | Session deleted after fixes are applied |
@@ -883,17 +892,18 @@ No multi-model review is applied — the user drives this interaction directly.
 
 1. **The outer loop never dies** — errors are caught, logged, and the loop continues. This is an example of where rigid Go code is the right choice: the loop must be deterministic and resilient regardless of what the LLM does.
 2. **Each task runs in an isolated OpenCode session** — clean context, no bleed between tasks
-3. **Parallel execution** — tasks in the same phase (`parallel_group`) run concurrently, bounded by `spec.max_parallel_tasks`
-4. **Phase review gate** — after all tasks in a phase complete, secondary/tertiary models review all uncommitted changes, primary incorporates feedback, then the phase is committed
-5. **Post-review hardening** — after the phase review gate, two additional primary-model passes run sequentially: (a) External Assumption Validator & Repair — finds and fixes invalid, fragile, or unverifiable assumptions about external systems; (b) Domain Hardening & Polishing — improves resilience, clarity, and operability. Both modify the working tree directly.
-6. **Clean phase boundaries** — each phase starts from a committed state, so the next phase builds on reviewed work
-7. **Status persistence** — task status is written to tasks.md after each task completes, providing crash recovery
-8. **Resumability** — `otto spec execute` can be re-run at any time. It reads task statuses from tasks.md and resumes from the first incomplete phase. Completed phases (already committed) are skipped. A partially-completed phase resumes its pending tasks.
-9. **Question harvesting (non-blocking)** — after each phase, a dedicated LLM pass scans the complete dialog logs of all task executions in that phase, extracting any uncertainties, assumptions, open questions, or concerns. These are appended to questions.md but **never halt execution**. They serve as advisory context — subsequent phases and LLM prompts receive the questions as input so the LLM is aware of open uncertainties, but the outer loop continues regardless. The user can review and address questions at any time via `otto spec questions`.
-10. **Summary chaining** — each phase's commit summary is fed into the next phase's task prompts as context, so the LLM knows what changed
-11. **Task retry on failure** — a failed task is retried until it succeeds, up to `spec.max_task_retries` (default 15). Tasks should never permanently block progress. On each retry, a fresh OpenCode session is created with the task description, the error/output from the previous attempt, and additional instruction to correct the failure. Only after exhausting all retries is a task marked `failed` — and even then the outer loop continues to the next phase if possible.
-12. **Parallel task conflict acceptance** — multiple tasks in the same phase may run concurrently in the same worktree. This means file conflicts, merge issues, or stale reads are possible. Otto accepts this: some error rate is tolerable and will be caught by the phase review gate or by task retries. The system is eventually consistent. This is a pragmatic tradeoff — perfect isolation (separate worktrees per task) would add enormous complexity for marginal benefit.
-13. **Documentation alignment** — after all phases complete, a final documentation alignment pass ensures all docs in the repo accurately reflect the current behavior of the branch. This uses the primary model with secondary/tertiary review, and only modifies documentation — never runtime behavior.
+3. **Task briefing** — before executing each task, a preparatory LLM call reads all spec artifacts (requirements, research, design, tasks) and distills a focused implementation brief specific to that task. This replaces the naive approach of dumping all context documents into every task prompt. The executor receives a crisp, task-relevant brief plus pointers to the raw spec files so it can explore further if needed. Briefing is enabled by default (`spec.task_briefing: true`) and gracefully falls back to the static context dump if the briefing call fails.
+4. **Parallel execution** — tasks in the same phase (`parallel_group`) run concurrently, bounded by `spec.max_parallel_tasks`
+5. **Phase review gate** — after all tasks in a phase complete, secondary/tertiary models review all uncommitted changes, primary incorporates feedback, then the phase is committed
+6. **Post-review hardening** — after the phase review gate, two additional primary-model passes run sequentially: (a) External Assumption Validator & Repair — finds and fixes invalid, fragile, or unverifiable assumptions about external systems; (b) Domain Hardening & Polishing — improves resilience, clarity, and operability. Both modify the working tree directly.
+7. **Clean phase boundaries** — each phase starts from a committed state, so the next phase builds on reviewed work
+8. **Status persistence** — task status is written to tasks.md after each task completes, providing crash recovery
+9. **Resumability** — `otto spec execute` can be re-run at any time. It reads task statuses from tasks.md and resumes from the first incomplete phase. Completed phases (already committed) are skipped. A partially-completed phase resumes its pending tasks.
+10. **Question harvesting (non-blocking)** — after each phase, a dedicated LLM pass scans the complete dialog logs of all task executions in that phase, extracting any uncertainties, assumptions, open questions, or concerns. These are appended to questions.md but **never halt execution**. They serve as advisory context — subsequent phases and LLM prompts receive the questions as input so the LLM is aware of open uncertainties, but the outer loop continues regardless. The user can review and address questions at any time via `otto spec questions`.
+11. **Summary chaining** — each phase's commit summary is fed into the next phase's task prompts as context, so the LLM knows what changed
+12. **Task retry on failure** — a failed task is retried until it succeeds, up to `spec.max_task_retries` (default 15). Tasks should never permanently block progress. On each retry, a fresh OpenCode session is created with the task description, the error/output from the previous attempt, and additional instruction to correct the failure. Only after exhausting all retries is a task marked `failed` — and even then the outer loop continues to the next phase if possible.
+13. **Parallel task conflict acceptance** — multiple tasks in the same phase may run concurrently in the same worktree. This means file conflicts, merge issues, or stale reads are possible. Otto accepts this: some error rate is tolerable and will be caught by the phase review gate or by task retries. The system is eventually consistent. This is a pragmatic tradeoff — perfect isolation (separate worktrees per task) would add enormous complexity for marginal benefit.
+14. **Documentation alignment** — after all phases complete, a final documentation alignment pass ensures all docs in the repo accurately reflect the current behavior of the branch. This uses the primary model with secondary/tertiary review, and only modifies documentation — never runtime behavior.
 
 ### Execution Flow
 
@@ -914,20 +924,28 @@ otto spec execute [--spec <slug>]
 │  5. For each task in the phase:                          │
 │     a. Create fresh OpenCode session                    │
 │        (directory-scoped to the spec's worktree)        │
-│     b. Build prompt:                                    │
-│        - Task description                               │
-│        - Relevant spec docs (requirements, design)      │
+│     b. Task Briefing (if enabled):                      │
+│        i.  Create briefing session (primary model)      │
+│        ii. Send task-briefing.md prompt with ALL spec   │
+│            artifacts + target task details               │
+│        iii.LLM distills a focused implementation brief  │
+│        iv. Delete briefing session                      │
+│        v.  On failure: fall back to static prompt       │
+│     c. Build executor prompt:                           │
+│        - If briefed: brief + reference doc paths        │
+│        - If not briefed: raw spec docs (requirements,   │
+│          research, design) + task description            │
 │        - Summaries of completed prior phases             │
 │        - If retry: previous attempt error/output        │
-│     c. Send prompt, wait for completion                 │
-│     d. Evaluate result:                                 │
+│     d. Send prompt, wait for completion                 │
+│     e. Evaluate result:                                 │
 │        - Success → capture summary, update status       │
 │        - Failure → increment retry count                │
 │          - retries < max_task_retries → retry (goto a)  │
 │          - retries >= max_task_retries → mark failed    │
-│     e. Write run summary to history/run-NNN.md          │
-│     f. Delete OpenCode session (after collecting logs)  │
-│     g. Scan output for questions → append to questions  │
+│     f. Write run summary to history/run-NNN.md          │
+│     g. Delete OpenCode session (after collecting logs)  │
+│     h. Scan output for questions → append to questions  │
 │        (non-blocking — execution continues regardless)  │
 │  6. Wait for ALL tasks in the phase to complete          │
 │                                                         │
@@ -1785,6 +1803,7 @@ otto/
       design.md                         # Design generation prompt
       tasks.md                          # Task generation prompt
       review.md                         # Multi-model critical review prompt
+      task-briefing.md                   # Pre-execution task context distillation
       phase-review.md                   # Inter-phase review gate prompt
       external-assumptions.md           # External assumption validation & repair (per-phase)
       domain-hardening.md               # Domain hardening & polishing (per-phase)
@@ -1895,6 +1914,8 @@ otto/
 29. **Server daemonization** — `otto server start` launches the daemon as a fully detached background process using `setsid` (Linux). The CLI writes a PID file and returns immediately. The daemon persists after shell exit, logout, and terminal close. stdout/stderr are redirected to log files. `otto server start --foreground` is available for systemd and debugging. No `nohup` wrapper needed.
 
 30. **Dirty worktree handling** — Otto treats dirty worktrees/branches as its own responsibility. Uncommitted changes from previous sessions, manual edits, or interrupted executions are not errors — the LLM sees them as part of the working context and can fix, incorporate, or discard them. At phase completion, all changes (including pre-existing dirty state) are committed together. The retry loop handles any failures caused by dirty state.
+
+31. **Task briefing for context distillation** — Before executing each task, otto runs a preparatory LLM call (the "briefing" step) that reads all spec artifacts (requirements.md, research.md, design.md, tasks.md, phase summaries) and produces a focused implementation brief specific to that task. This replaces the naive approach of dumping every spec document verbatim into every task prompt. Benefits: (a) the executor receives a higher signal-to-noise prompt, improving quality especially with less capable models; (b) the briefing is an inspectable artifact for debugging; (c) it externalizes the context-distillation reasoning that intelligent models do internally, making the pipeline more robust and model-independent. The briefed prompt includes reference pointers to the raw spec files (`requirements.md`, `design.md`, etc.) so the executor can explore further context if the brief is insufficient. Enabled by default (`spec.task_briefing: true`). Falls back gracefully to the static context dump if the briefing call fails (LLM error, empty response, timeout). Configurable via `spec.task_briefing: false` in `otto.jsonc` to disable.
 
 ## Open Questions
 

@@ -10,6 +10,9 @@ import (
 
 var expectedTemplates = []string{
 	"design.md",
+	"documentation-alignment.md",
+	"domain-hardening.md",
+	"external-assumptions.md",
 	"phase-review.md",
 	"pr-comment-respond.md",
 	"pr-review.md",
@@ -41,8 +44,8 @@ func TestList(t *testing.T) {
 	names, err := List()
 	require.NoError(t, err)
 
-	// Should contain all 10 .md files
-	assert.GreaterOrEqual(t, len(names), 10)
+	// Should contain all 13 .md files
+	assert.GreaterOrEqual(t, len(names), 13)
 	for _, expected := range expectedTemplates {
 		assert.Contains(t, names, expected)
 	}
@@ -178,6 +181,15 @@ func TestExecuteAllTemplatesWithFullData(t *testing.T) {
 			"COMMENT_BODY_PLACEHOLDER",
 			"COMMENT_THREAD_PLACEHOLDER",
 			"CODE_CONTEXT_PLACEHOLDER",
+		},
+		"external-assumptions.md": {
+			"PHASE_SUMMARIES_PLACEHOLDER",
+		},
+		"domain-hardening.md": {
+			"PHASE_SUMMARIES_PLACEHOLDER",
+		},
+		"documentation-alignment.md": {
+			"PHASE_SUMMARIES_PLACEHOLDER",
 		},
 	}
 

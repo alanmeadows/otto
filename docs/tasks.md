@@ -419,6 +419,27 @@ For each template below:
 - Validate: `{{.comment_body}}`, `{{.file_path}}`, `{{.line_number}}`, `{{.code_context}}` variables present
 - Verify JSON output schema matches what comment handler (8.4) expects to parse
 
+#### 3.3.11 — `external-assumptions.md` template
+- New file: `internal/prompts/external-assumptions.md` — External Assumption Validator & Repair agent
+- Validate: `{{.phase_summaries}}` variable present (conditional)
+- Verify the prompt instructs the LLM to enumerate external boundaries, identify assumptions, and fix/guard them directly in the working tree
+- Confirm output format is strict: "Issues fixed: N" followed by one-line bullet summaries
+- Smoke test: parse template with `phase_summaries` populated and empty
+
+#### 3.3.12 — `domain-hardening.md` template
+- New file: `internal/prompts/domain-hardening.md` — Domain Hardening & Polishing agent
+- Validate: `{{.phase_summaries}}` variable present (conditional)
+- Verify the prompt focuses on resilience, idempotency, retry discipline, error handling, and codebase idiom alignment
+- Confirm output format is strict: "Improvements made: N" followed by one-line bullet summaries
+- Smoke test: parse template with `phase_summaries` populated and empty
+
+#### 3.3.13 — `documentation-alignment.md` template
+- New file: `internal/prompts/documentation-alignment.md` — Documentation Alignment agent
+- Validate: `{{.phase_summaries}}` variable present (conditional)
+- Verify the prompt is documentation-only (no runtime behavior changes) and covers README, docs/, inline docs, examples, configs
+- Confirm output format is strict: "Docs updated: N" followed by one-line bullet summaries
+- Smoke test: parse template with `phase_summaries` populated and empty
+
 **For each template:** use `{{.variable}}` syntax matching the Template Variables table (design.md line 93). The existing prompts already use this syntax — verify no mismatches. Write a comprehensive unit test in `internal/prompts/loader_test.go` that `template.New().Parse()`s every embedded template with a fully-populated data map and asserts no errors.
 
 ### 3.4 — Implement `otto spec add <prompt>`
@@ -628,6 +649,66 @@ This is the most mechanically complex code in the project. Break into sub-tasks:
   - Individual task prompts in `runner.RunTask()` — injected at runtime, not baked into a template file
 - Ensures downstream tasks know what upstream phases accomplished
 
+### 4.6 — Implement external assumptions validation step
+- **status**: pending
+
+- Within `execute.go`, after the phase review gate (4.2) and before the phase commit:
+  1. Read phase summaries via `readPhaseSummaries(spec)` for context
+  2. Create fresh OpenCode session (directory-scoped to repo) with primary model
+  3. Render `external-assumptions.md` prompt template with `{{.phase_summaries}}` data
+  4. Send prompt to primary model — the LLM will:
+     - Run `git diff origin/main...HEAD` to enumerate external boundaries
+     - Identify invalid, fragile, or unverifiable assumptions about external systems
+     - Apply fixes/guards directly to the working tree (timeouts, retries, validation, error handling)
+  5. Delete session after completion
+  6. Log the issues-fixed count from the LLM output
+- This runs **per phase**, after the secondary/tertiary review gate, before domain hardening
+- Non-blocking: if the session fails, log the error and continue to the next step
+- The LLM modifies files directly — no parsing of output needed beyond logging
+
+### 4.7 — Implement domain hardening step
+- **status**: pending
+
+- Within `execute.go`, after external assumptions validation (4.6) and before the phase commit:
+  1. Read phase summaries via `readPhaseSummaries(spec)` for context
+  2. Create fresh OpenCode session (directory-scoped to repo) with primary model
+  3. Render `domain-hardening.md` prompt template with `{{.phase_summaries}}` data
+  4. Send prompt to primary model — the LLM will:
+     - Review committed and uncommitted changes for resilience improvements
+     - Apply hardening: idempotency, retry/backoff, error classification, observability, flakiness removal
+     - Align with codebase idioms
+  5. Delete session after completion
+  6. Log the improvements-made count from the LLM output
+- This runs **per phase**, after external assumptions validation, before the phase commit
+- Non-blocking: if the session fails, log the error and continue to commit
+- The LLM modifies files directly — no parsing of output needed beyond logging
+
+### 4.8 — Implement documentation alignment phase
+- **status**: pending
+
+- Within `execute.go`, after ALL phases complete (after the main phase loop exits):
+  1. Read all accumulated phase summaries
+  2. Run the multi-model review pipeline (primary generates, secondary/tertiary review, primary incorporates):
+     a. Primary model (clean session): render `documentation-alignment.md` prompt template with `{{.phase_summaries}}`
+     b. The LLM updates documentation (README, docs/, inline docs, examples, configs) to reflect current branch behavior
+     c. Secondary model reviews the documentation changes (clean session)
+     d. (Optional) Tertiary model reviews independently
+     e. Primary model incorporates review feedback (clean session)
+  3. If changes were made, commit with message: `otto: documentation alignment`
+  4. All sessions deleted after use
+- This is a **documentation-only** phase — the LLM must NOT change runtime behavior
+- Non-blocking: if any session fails, log the error and skip the documentation commit
+- Use the existing `ReviewPipeline` from `internal/opencode/review.go` for the multi-model flow
+
+### 4.9 — Wire new prompt templates into execution flow
+- **status**: pending
+
+- Update `execute.go` to call the new steps in correct order within each phase:
+  1. Run tasks → 2. Phase review gate → **3. External assumptions (4.6)** → **4. Domain hardening (4.7)** → 5. Commit → 6. Summary → 7. Question harvest
+- After the main loop: **8. Documentation alignment (4.8)**
+- Wire `{{.phase_summaries}}` into the new prompt templates alongside existing ones (`phase-review.md`, `question-harvest.md`, `tasks.md`)
+- Add the new prompt template names to the loader test in `internal/prompts/loader_test.go` to ensure all templates parse without error
+
 ---
 
 ## Phase 5: PR Backend — Interface & ADO Implementation
@@ -637,7 +718,7 @@ Build the PR backend abstraction and the primary ADO implementation.
 ### 5.1 — Define PRBackend interface and types
 - **status**: pending
 
-- `internal/provider/provider.go`:
+- `internal/provider/provider.go`: mn n
   - `PRBackend` interface with all methods from design.md (line 977): `Name()`, `MatchesURL()`, `GetPR()`, `GetPipelineStatus()`, `GetBuildLogs()`, `GetComments()`, `PostComment()`, `PostInlineComment()`, `ReplyToComment()`, `ResolveComment()`, `RunWorkflow()`
   - Supporting types: `PRInfo`, `PipelineStatus`, `Comment`, `InlineComment`, `CommentResolution`, `WorkflowAction`
   - **`WorkflowSubmit` action:** reserved for future `otto pr create` feature. Document as "reserved for future use" in interface comments. Backends should return `ErrUnsupported` for unimplemented actions.
@@ -1052,6 +1133,14 @@ Phase 0 (Foundation)
 ## Review Feedback Incorporated
 
 This task list incorporates the following feedback from a comprehensive review:
+
+**Post-Review Hardening & Documentation Phases Added:**
+- 3.3.11–3.3.13: Prompt template validation for `external-assumptions.md`, `domain-hardening.md`, `documentation-alignment.md`
+- 4.6: External Assumption Validator & Repair step — per-phase, primary model, after review gate
+- 4.7: Domain Hardening & Polishing step — per-phase, primary model, after external assumptions
+- 4.8: Documentation Alignment phase — end of all phases, primary model with secondary/tertiary review
+- 4.9: Wire new prompt templates into execution flow
+- Updated design.md execution flow diagram, template tables, and module structure to reflect new phases
 
 **Missing Tasks Added:**
 - 0.8: OpenCode permission config writer (moved from Phase 1 to Phase 0 — no SDK dependency)

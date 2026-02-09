@@ -85,6 +85,9 @@ All LLM prompts are stored as **markdown files** in the codebase at `internal/pr
 | `tasks.md` | `otto spec task generate` | Task decomposition with parallel grouping |
 | `review.md` | Multi-model review pipeline | Critical review of any artifact |
 | `phase-review.md` | `otto spec execute` | Inter-phase review gate |
+| `external-assumptions.md` | `otto spec execute` | Post-review external assumption validation & repair (primary model) |
+| `domain-hardening.md` | `otto spec execute` | Post-review domain hardening & polishing (primary model) |
+| `documentation-alignment.md` | `otto spec execute` | End-of-execution documentation alignment (primary + review) |
 | `question-harvest.md` | `otto spec execute` | Extract questions from execution logs |
 | `question-resolve.md` | `otto spec questions` | Auto-resolution of open questions |
 | `pr-review.md` | `otto pr review` | Third-party PR review with inline comments |
@@ -522,6 +525,9 @@ Otto deletes OpenCode sessions after they are no longer needed — but **only af
 |---------|-----------------|
 | Task execution | Session deleted **after** dialog log is extracted for question harvesting and run summary |
 | Phase review gate | Session deleted after review feedback is captured |
+| External assumptions validation | Session deleted after fixes are applied |
+| Domain hardening | Session deleted after improvements are applied |
+| Documentation alignment | Session deleted after doc updates are committed |
 | PR fix | Session deleted after fix result (commit hash or failure) is recorded in PR document |
 | PR comment response | Session deleted after reply is posted and PR document updated |
 | PR review (`pr review`) | Session deleted after comments are posted (or user declines) |
@@ -613,6 +619,9 @@ Each step uses a **fresh OpenCode session** — directory-scoped to the target w
 | `otto spec design` | design.md |
 | `otto spec task generate` | tasks.md |
 | `otto spec execute` | Each phase's uncommitted work (inter-phase review gate) |
+| `otto spec execute` | External assumption validation & repair (primary model, per-phase, after review gate) |
+| `otto spec execute` | Domain hardening & polishing (primary model, per-phase, after external assumptions) |
+| `otto spec execute` | Documentation alignment (primary model with secondary/tertiary review, end of all phases) |
 | `otto pr fix` | Each fix attempt prompt and result |
 
 ### Where it is NOT Applied
@@ -876,13 +885,15 @@ No multi-model review is applied — the user drives this interaction directly.
 2. **Each task runs in an isolated OpenCode session** — clean context, no bleed between tasks
 3. **Parallel execution** — tasks in the same phase (`parallel_group`) run concurrently, bounded by `spec.max_parallel_tasks`
 4. **Phase review gate** — after all tasks in a phase complete, secondary/tertiary models review all uncommitted changes, primary incorporates feedback, then the phase is committed
-5. **Clean phase boundaries** — each phase starts from a committed state, so the next phase builds on reviewed work
-6. **Status persistence** — task status is written to tasks.md after each task completes, providing crash recovery
-7. **Resumability** — `otto spec execute` can be re-run at any time. It reads task statuses from tasks.md and resumes from the first incomplete phase. Completed phases (already committed) are skipped. A partially-completed phase resumes its pending tasks.
-8. **Question harvesting (non-blocking)** — after each phase, a dedicated LLM pass scans the complete dialog logs of all task executions in that phase, extracting any uncertainties, assumptions, open questions, or concerns. These are appended to questions.md but **never halt execution**. They serve as advisory context — subsequent phases and LLM prompts receive the questions as input so the LLM is aware of open uncertainties, but the outer loop continues regardless. The user can review and address questions at any time via `otto spec questions`.
-9. **Summary chaining** — each phase's commit summary is fed into the next phase's task prompts as context, so the LLM knows what changed
-10. **Task retry on failure** — a failed task is retried until it succeeds, up to `spec.max_task_retries` (default 15). Tasks should never permanently block progress. On each retry, a fresh OpenCode session is created with the task description, the error/output from the previous attempt, and additional instruction to correct the failure. Only after exhausting all retries is a task marked `failed` — and even then the outer loop continues to the next phase if possible.
-11. **Parallel task conflict acceptance** — multiple tasks in the same phase may run concurrently in the same worktree. This means file conflicts, merge issues, or stale reads are possible. Otto accepts this: some error rate is tolerable and will be caught by the phase review gate or by task retries. The system is eventually consistent. This is a pragmatic tradeoff — perfect isolation (separate worktrees per task) would add enormous complexity for marginal benefit.
+5. **Post-review hardening** — after the phase review gate, two additional primary-model passes run sequentially: (a) External Assumption Validator & Repair — finds and fixes invalid, fragile, or unverifiable assumptions about external systems; (b) Domain Hardening & Polishing — improves resilience, clarity, and operability. Both modify the working tree directly.
+6. **Clean phase boundaries** — each phase starts from a committed state, so the next phase builds on reviewed work
+7. **Status persistence** — task status is written to tasks.md after each task completes, providing crash recovery
+8. **Resumability** — `otto spec execute` can be re-run at any time. It reads task statuses from tasks.md and resumes from the first incomplete phase. Completed phases (already committed) are skipped. A partially-completed phase resumes its pending tasks.
+9. **Question harvesting (non-blocking)** — after each phase, a dedicated LLM pass scans the complete dialog logs of all task executions in that phase, extracting any uncertainties, assumptions, open questions, or concerns. These are appended to questions.md but **never halt execution**. They serve as advisory context — subsequent phases and LLM prompts receive the questions as input so the LLM is aware of open uncertainties, but the outer loop continues regardless. The user can review and address questions at any time via `otto spec questions`.
+10. **Summary chaining** — each phase's commit summary is fed into the next phase's task prompts as context, so the LLM knows what changed
+11. **Task retry on failure** — a failed task is retried until it succeeds, up to `spec.max_task_retries` (default 15). Tasks should never permanently block progress. On each retry, a fresh OpenCode session is created with the task description, the error/output from the previous attempt, and additional instruction to correct the failure. Only after exhausting all retries is a task marked `failed` — and even then the outer loop continues to the next phase if possible.
+12. **Parallel task conflict acceptance** — multiple tasks in the same phase may run concurrently in the same worktree. This means file conflicts, merge issues, or stale reads are possible. Otto accepts this: some error rate is tolerable and will be caught by the phase review gate or by task retries. The system is eventually consistent. This is a pragmatic tradeoff — perfect isolation (separate worktrees per task) would add enormous complexity for marginal benefit.
+13. **Documentation alignment** — after all phases complete, a final documentation alignment pass ensures all docs in the repo accurately reflect the current behavior of the branch. This uses the primary model with secondary/tertiary review, and only modifies documentation — never runtime behavior.
 
 ### Execution Flow
 
@@ -931,19 +942,45 @@ otto spec execute [--spec <slug>]
 │        Same review, fresh perspective                   │
 │     c. Primary model (clean session):                   │
 │        Incorporate all review feedback, fix issues       │
+│                                                         │
+│  ── Post-Review Hardening (Primary Model) ──────────── │
+│                                                         │
+│  7d. Primary model (clean session):                     │
+│      External Assumption Validator & Repair             │
+│      - Enumerate external boundaries from diff          │
+│      - Fix/guard invalid or fragile assumptions         │
+│  7e. Primary model (clean session):                     │
+│      Domain Hardening & Polishing                       │
+│      - Improve resilience, clarity, operability         │
+│      - Idempotency, retry discipline, error handling    │
+│                                                         │
 │  8. Commit all changes for this phase                   │
 │     (git add -A && git commit)                          │
 │                                                         │
 │  ── Next Phase ──────────────────────────────────────── │
 │                                                         │
 │  9. Print progress: X/Y completed, Z running, W failed  │
-│  10. If all tasks done: exit                            │
+│  10. If all tasks done → proceed to step 12             │
 │      If only exhausted-retries tasks remain: warn, exit │
 │  11. Otherwise: goto 3                                  │
+│                                                         │
+│  ── Documentation Alignment (End of Execution) ──────── │
+│                                                         │
+│  12. After ALL phases complete:                          │
+│      a. Primary model (clean session):                  │
+│         Documentation Alignment — update docs to        │
+│         reflect current branch behavior                 │
+│      b. Secondary model reviews doc changes             │
+│      c. (Optional) Tertiary model reviews               │
+│      d. Primary incorporates feedback, finalizes docs   │
+│      e. Commit documentation changes                    │
+│         (git add -A && git commit)                      │
 └─────────────────────────────────────────────────────────┘
 ```
 
-The phase review gate ensures that each batch of parallel work is critically evaluated before being committed. The next phase starts from a clean, reviewed, committed state — so each phase builds on verified work rather than accumulating unchecked changes.
+The phase review gate ensures that each batch of parallel work is critically evaluated before being committed. After the review gate, two additional primary-model passes harden the phase's output: the **External Assumption Validator** finds and fixes invalid or fragile assumptions about external systems (APIs, infrastructure, auth, async behavior, rate limits), and the **Domain Hardening** pass improves resilience, error handling, and operability. Both modify the working tree directly before the phase is committed.
+
+After all phases complete, a final **Documentation Alignment** pass ensures all documentation in the repo accurately reflects the current state of the branch. This uses the primary model to update docs, with secondary/tertiary review to validate the changes. Only documentation is modified — never runtime behavior. The documentation changes are committed separately.
 
 ### Concurrent Access to tasks.md
 
@@ -1750,6 +1787,9 @@ otto/
       tasks.md                          # Task generation prompt
       review.md                         # Multi-model critical review prompt
       phase-review.md                   # Inter-phase review gate prompt
+      external-assumptions.md           # External assumption validation & repair (per-phase)
+      domain-hardening.md               # Domain hardening & polishing (per-phase)
+      documentation-alignment.md        # Documentation alignment (end of execution)
       question-harvest.md               # Question extraction from execution logs
       question-resolve.md               # Auto-resolution of open questions
       pr-review.md                      # Third-party PR review (inline comments)

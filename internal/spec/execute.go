@@ -117,6 +117,12 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 		// Phase review gate (task 4.2).
 		reviewPhase(ctx, client, cfg, repoDir, spec, phaseNum)
 
+		// External assumption validation (task 4.6).
+		validateExternalAssumptions(ctx, client, cfg, repoDir, spec, phaseNum)
+
+		// Domain hardening (task 4.7).
+		hardenDomain(ctx, client, cfg, repoDir, spec, phaseNum)
+
 		// Phase commit (task 4.1e).
 		committed := commitPhase(repoDir, phaseNum, phase)
 
@@ -136,6 +142,9 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 			return ctx.Err()
 		}
 	}
+
+	// Documentation alignment (task 4.8) — runs once after all phases complete.
+	alignDocumentation(ctx, client, cfg, repoDir, spec)
 
 	fmt.Fprintf(os.Stderr, "\n✓ Execution complete\n")
 	return nil
@@ -365,6 +374,163 @@ func reviewPhase(
 
 	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
 		slog.Warn("failed to delete review session", "error", err)
+	}
+}
+
+// validateExternalAssumptions runs the External Assumption Validator & Repair agent.
+// It examines all current changes for invalid, fragile, or unverifiable assumptions
+// about external systems and fixes them in-place.
+// Non-blocking: logs errors but does not fail execution.
+func validateExternalAssumptions(
+	ctx context.Context,
+	client opencode.LLMClient,
+	cfg *config.Config,
+	repoDir string,
+	spec *Spec,
+	phaseNum int,
+) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	phaseSummaries := readPhaseSummaries(spec)
+
+	data := map[string]string{
+		"phase_summaries": phaseSummaries,
+	}
+
+	prompt, err := prompts.Execute("external-assumptions.md", data)
+	if err != nil {
+		slog.Warn("failed to render external-assumptions template", "error", err)
+		return
+	}
+
+	slog.Info("running external assumption validation", "phase", phaseNum)
+
+	session, err := client.CreateSession(ctx, fmt.Sprintf("phase-%d-ext-assumptions", phaseNum), repoDir)
+	if err != nil {
+		slog.Warn("failed to create external assumptions session", "phase", phaseNum, "error", err)
+		return
+	}
+
+	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
+	_, err = client.SendPrompt(ctx, session.ID, prompt, primaryModel, repoDir)
+	if err != nil {
+		slog.Warn("external assumption validation failed", "phase", phaseNum, "error", err)
+	}
+
+	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
+		slog.Warn("failed to delete external assumptions session", "error", err)
+	}
+}
+
+// hardenDomain runs the Domain Hardening & Polishing agent.
+// It improves resilience, clarity, and operability of current changes,
+// assuming external assumptions have already been validated.
+// Non-blocking: logs errors but does not fail execution.
+func hardenDomain(
+	ctx context.Context,
+	client opencode.LLMClient,
+	cfg *config.Config,
+	repoDir string,
+	spec *Spec,
+	phaseNum int,
+) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	phaseSummaries := readPhaseSummaries(spec)
+
+	data := map[string]string{
+		"phase_summaries": phaseSummaries,
+	}
+
+	prompt, err := prompts.Execute("domain-hardening.md", data)
+	if err != nil {
+		slog.Warn("failed to render domain-hardening template", "error", err)
+		return
+	}
+
+	slog.Info("running domain hardening", "phase", phaseNum)
+
+	session, err := client.CreateSession(ctx, fmt.Sprintf("phase-%d-domain-hardening", phaseNum), repoDir)
+	if err != nil {
+		slog.Warn("failed to create domain hardening session", "phase", phaseNum, "error", err)
+		return
+	}
+
+	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
+	_, err = client.SendPrompt(ctx, session.ID, prompt, primaryModel, repoDir)
+	if err != nil {
+		slog.Warn("domain hardening failed", "phase", phaseNum, "error", err)
+	}
+
+	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
+		slog.Warn("failed to delete domain hardening session", "error", err)
+	}
+}
+
+// alignDocumentation runs the Documentation Alignment agent with multi-model review.
+// It ensures documentation accurately reflects the current behavior of the branch
+// after all task phases, fixes, and hardening have been applied.
+// This runs once after all phases complete, using the ReviewPipeline for quality.
+// Non-blocking: logs errors but does not fail execution.
+func alignDocumentation(
+	ctx context.Context,
+	client opencode.LLMClient,
+	cfg *config.Config,
+	repoDir string,
+	spec *Spec,
+) {
+	if ctx.Err() != nil {
+		return
+	}
+
+	phaseSummaries := readPhaseSummaries(spec)
+
+	data := map[string]string{
+		"phase_summaries": phaseSummaries,
+	}
+
+	prompt, err := prompts.Execute("documentation-alignment.md", data)
+	if err != nil {
+		slog.Warn("failed to render documentation-alignment template", "error", err)
+		return
+	}
+
+	slog.Info("running documentation alignment with multi-model review")
+
+	// Use the ReviewPipeline for multi-model quality assurance.
+	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
+	secondaryModel := opencode.ParseModelRef(cfg.Models.Secondary)
+
+	reviewCfg := opencode.ReviewConfig{
+		Primary:   primaryModel,
+		Secondary: secondaryModel,
+		MaxCycles: 1,
+	}
+	if cfg.Models.Tertiary != "" {
+		tertiaryModel := opencode.ParseModelRef(cfg.Models.Tertiary)
+		reviewCfg.Tertiary = &tertiaryModel
+	}
+
+	pipeline := opencode.NewReviewPipeline(client, repoDir, reviewCfg)
+	_, err = pipeline.Review(ctx, prompt, data)
+	if err != nil {
+		slog.Warn("documentation alignment review failed", "error", err)
+		return
+	}
+
+	// Commit documentation changes separately if any were made.
+	if gitHasChanges(repoDir) {
+		if err := gitCommit(repoDir, "otto: documentation alignment"); err != nil {
+			slog.Warn("failed to commit documentation alignment changes", "error", err)
+		} else {
+			slog.Info("committed documentation alignment changes")
+		}
+	} else {
+		slog.Info("no documentation changes needed")
 	}
 }
 

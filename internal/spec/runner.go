@@ -17,6 +17,8 @@ import (
 
 // RunTask executes a single task from a spec's tasks.md.
 // If taskID is empty, it infers the task when exactly one is runnable.
+// previousError, if non-empty, is the error message from a prior failed attempt
+// and will be injected into the task prompt so the LLM can correct the issue.
 func RunTask(
 	ctx context.Context,
 	client opencode.LLMClient,
@@ -24,6 +26,7 @@ func RunTask(
 	repoDir string,
 	slug string,
 	taskID string,
+	previousError string,
 ) error {
 	spec, err := ResolveSpec(slug, repoDir)
 	if err != nil {
@@ -88,7 +91,7 @@ func RunTask(
 	}
 
 	// Build task execution prompt.
-	prompt := buildTaskPrompt(spec, task)
+	prompt := buildTaskPrompt(spec, task, previousError)
 
 	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
 
@@ -110,10 +113,10 @@ func RunTask(
 			slog.Warn("failed to create history directory", "error", err)
 		} else {
 			num := nextHistoryNumber(spec.HistoryDir)
-			if err := saveHistory(spec.HistoryDir, num, messages); err != nil {
+			if err := saveHistory(spec.HistoryDir, num, task.ID, messages); err != nil {
 				slog.Warn("failed to save history", "error", err)
 			} else {
-				slog.Info("saved run history", "file", fmt.Sprintf("run-%03d.md", num))
+				slog.Info("saved run history", "file", fmt.Sprintf("run-%03d-%s.md", num, task.ID))
 			}
 		}
 	}
@@ -133,7 +136,8 @@ func RunTask(
 }
 
 // buildTaskPrompt builds the composite prompt for task execution.
-func buildTaskPrompt(spec *Spec, task *Task) string {
+// If previousError is non-empty, it is included so the LLM can fix the prior failure.
+func buildTaskPrompt(spec *Spec, task *Task, previousError string) string {
 	var buf strings.Builder
 
 	buf.WriteString("You are executing a development task. Here is the context:\n\n")
@@ -180,13 +184,21 @@ func buildTaskPrompt(spec *Spec, task *Task) string {
 		buf.WriteString("\n\n")
 	}
 
+	// Previous error context for retries.
+	if previousError != "" {
+		buf.WriteString("## Previous Attempt Failed\n\n")
+		buf.WriteString("The previous attempt at this task failed with the following error. Fix the issue and complete the task:\n\n")
+		buf.WriteString(previousError)
+		buf.WriteString("\n\n")
+	}
+
 	buf.WriteString("Complete this task. Make all necessary code changes.\n")
 
 	return buf.String()
 }
 
-// historyNumRe matches run-NNN.md filenames.
-var historyNumRe = regexp.MustCompile(`^run-(\d+)\.md$`)
+// historyNumRe matches run-NNN.md and run-NNN-TASKID.md filenames.
+var historyNumRe = regexp.MustCompile(`^run-(\d+)(?:-[a-zA-Z0-9_-]+)?\.md$`)
 
 // nextHistoryNumber scans the history directory for run-NNN.md files
 // and returns the next sequential number.
@@ -214,8 +226,9 @@ func nextHistoryNumber(historyDir string) int {
 }
 
 // saveHistory writes a run history file with all messages from a session.
-func saveHistory(historyDir string, num int, messages []opencode.Message) error {
-	filename := fmt.Sprintf("run-%03d.md", num)
+// The taskID is included in the filename to avoid collisions during parallel execution.
+func saveHistory(historyDir string, num int, taskID string, messages []opencode.Message) error {
+	filename := fmt.Sprintf("run-%03d-%s.md", num, taskID)
 	path := filepath.Join(historyDir, filename)
 
 	var buf strings.Builder

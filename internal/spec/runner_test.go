@@ -58,7 +58,7 @@ func TestRunTask_InferSingle(t *testing.T) {
 	}
 
 	// task-002 is the only runnable task (task-001 completed, task-003 depends on task-002).
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "", "")
 	require.NoError(t, err)
 
 	// Verify task-002 is now completed.
@@ -85,7 +85,7 @@ func TestRunTask_ByID(t *testing.T) {
 		Models: config.ModelsConfig{Primary: "test/model"},
 	}
 
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "task-002")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "task-002", "")
 	require.NoError(t, err)
 
 	tasks, err := ParseTasks(filepath.Join(specDir, "tasks.md"))
@@ -116,7 +116,7 @@ func TestRunTask_NoRunnable(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := &config.Config{Models: config.ModelsConfig{Primary: "test/model"}}
 
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-none", "")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-none", "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "no runnable tasks")
 }
@@ -148,7 +148,7 @@ func TestRunTask_MultipleRunnable(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := &config.Config{Models: config.ModelsConfig{Primary: "test/model"}}
 
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-multi", "")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-multi", "", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "multiple runnable tasks")
 	assert.Contains(t, err.Error(), "task-001")
@@ -161,7 +161,7 @@ func TestRunTask_TaskNotFound(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := &config.Config{Models: config.ModelsConfig{Primary: "test/model"}}
 
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "task-999")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-test", "task-999", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
@@ -186,7 +186,7 @@ func TestRunTask_MissingPrerequisites(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := &config.Config{Models: config.ModelsConfig{Primary: "test/model"}}
 
-	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-prereq", "task-001")
+	err := RunTask(context.Background(), mock, cfg, repoDir, "runner-prereq", "task-001", "")
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "design.md")
 }
@@ -213,10 +213,10 @@ func TestSaveHistory(t *testing.T) {
 		{Role: "assistant", Content: "World"},
 	}
 
-	err := saveHistory(dir, 1, messages)
+	err := saveHistory(dir, 1, "task-001", messages)
 	require.NoError(t, err)
 
-	content, err := os.ReadFile(filepath.Join(dir, "run-001.md"))
+	content, err := os.ReadFile(filepath.Join(dir, "run-001-task-001.md"))
 	require.NoError(t, err)
 	assert.Contains(t, string(content), "# Run 001")
 	assert.Contains(t, string(content), "## user")
@@ -237,7 +237,7 @@ func TestBuildTaskPrompt(t *testing.T) {
 		Files:       []string{"file1.go", "file2.go"},
 	}
 
-	prompt := buildTaskPrompt(s, task)
+	prompt := buildTaskPrompt(s, task, "")
 	assert.Contains(t, prompt, "You are executing a development task")
 	assert.Contains(t, prompt, "task-001")
 	assert.Contains(t, prompt, "Test Task")

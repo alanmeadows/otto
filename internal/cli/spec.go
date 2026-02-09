@@ -29,6 +29,7 @@ func init() {
 	specRequirementsCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specResearchCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specDesignCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
+	specExecuteCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specQuestionsCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specRunCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 }
@@ -154,8 +155,19 @@ var specExecuteCmd = &cobra.Command{
 	Use:   "execute",
 	Short: "Execute tasks from specification",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		fmt.Fprintln(cmd.OutOrStdout(), "not implemented yet")
-		return nil
+		client, mgr, err := newLLMClient(appConfig)
+		if err != nil {
+			return err
+		}
+		defer mgr.Shutdown()
+
+		repoDir := config.RepoRoot()
+		if repoDir == "" {
+			return fmt.Errorf("not in a git repository")
+		}
+
+		slug, _ := cmd.Flags().GetString("spec")
+		return spec.Execute(cmd.Context(), client, appConfig, repoDir, slug)
 	},
 }
 

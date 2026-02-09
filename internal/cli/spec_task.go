@@ -154,7 +154,7 @@ var specTaskRunCmd = &cobra.Command{
 
 		slug, _ := cmd.Flags().GetString("spec")
 		taskID, _ := cmd.Flags().GetString("id")
-		if err := spec.RunTask(cmd.Context(), client, appConfig, repoDir, slug, taskID); err != nil {
+		if err := spec.RunTask(cmd.Context(), client, appConfig, repoDir, slug, taskID, ""); err != nil {
 			return err
 		}
 

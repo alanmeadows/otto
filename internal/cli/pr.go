@@ -17,7 +17,15 @@ import (
 var prCmd = &cobra.Command{
 	Use:   "pr",
 	Short: "Manage pull requests",
-	Long:  `Add, list, review, and manage pull request lifecycle.`,
+	Long: `Add, list, review, and manage the pull request lifecycle.
+
+Otto tracks PRs across GitHub and Azure DevOps. Once a PR is added,
+the daemon polls for review comments, auto-fixes issues via the LLM,
+and pushes updated code — up to the configured max fix attempts.`,
+	Example: `  otto pr add https://github.com/org/repo/pull/42
+  otto pr list
+  otto pr status
+  otto pr review https://github.com/org/repo/pull/42`,
 }
 
 func init() {
@@ -55,7 +63,14 @@ func buildRegistry() *provider.Registry {
 var prAddCmd = &cobra.Command{
 	Use:   "add <url>",
 	Short: "Add a PR for tracking",
-	Args:  cobra.ExactArgs(1),
+	Long: `Add a pull request URL for otto to track.
+
+Otto detects the provider (GitHub or ADO) from the URL, fetches PR
+metadata, and creates a local PR document. The daemon will begin
+polling this PR for review feedback.`,
+	Example: `  otto pr add https://github.com/org/repo/pull/42
+  otto pr add https://dev.azure.com/org/project/_git/repo/pullrequest/123`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		prURL := args[0]
@@ -108,6 +123,10 @@ var prAddCmd = &cobra.Command{
 var prListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tracked PRs",
+	Long: `Display all tracked pull requests in a table.
+
+Shows PR ID, provider, status, branches, and fix attempt counts.`,
+	Example: `  otto pr list`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		prs, err := server.ListPRs()
 		if err != nil {
@@ -153,6 +172,12 @@ var prListCmd = &cobra.Command{
 var prStatusCmd = &cobra.Command{
 	Use:   "status [id]",
 	Short: "Show PR status",
+	Long: `Show detailed status for a tracked pull request.
+
+If no ID is given, otto infers the PR from the current branch.
+Displays provider, status, branches, URL, and fix attempt count.`,
+	Example: `  otto pr status
+  otto pr status 42`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var pr *server.PRDocument
 		var err error
@@ -185,6 +210,12 @@ var prStatusCmd = &cobra.Command{
 var prRemoveCmd = &cobra.Command{
 	Use:   "remove [id]",
 	Short: "Remove a tracked PR",
+	Long: `Stop tracking a pull request and delete its local document.
+
+If no ID is given, otto infers the PR from the current branch.
+This does not close the PR on the remote provider.`,
+	Example: `  otto pr remove 42
+  otto pr remove`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var pr *server.PRDocument
 		var err error
@@ -210,6 +241,13 @@ var prRemoveCmd = &cobra.Command{
 var prFixCmd = &cobra.Command{
 	Use:   "fix [id]",
 	Short: "Fix PR review issues",
+	Long: `Attempt to fix outstanding review comments on a tracked PR.
+
+Fetches unresolved review threads, sends them to the LLM for
+resolution, and pushes the resulting changes. Increments the
+fix attempt counter. If no ID is given, infers from current branch.`,
+	Example: `  otto pr fix
+  otto pr fix 42`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 
@@ -256,6 +294,13 @@ var prFixCmd = &cobra.Command{
 var prLogCmd = &cobra.Command{
 	Use:   "log [id]",
 	Short: "Show PR activity log",
+	Long: `Display the activity log for a tracked pull request.
+
+Shows the stored markdown body including review summaries, fix
+attempts, and any notes. If no ID is given, infers from the
+current branch.`,
+	Example: `  otto pr log
+  otto pr log 42`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var pr *server.PRDocument
 		var err error

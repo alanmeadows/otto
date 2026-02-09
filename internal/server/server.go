@@ -58,7 +58,9 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 		slog.Info("shutting down server")
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-		_ = srv.Shutdown(shutdownCtx)
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("HTTP server shutdown error", "error", err)
+		}
 	}()
 
 	slog.Info("starting HTTP server", "addr", addr)

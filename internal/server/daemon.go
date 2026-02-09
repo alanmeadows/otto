@@ -22,7 +22,11 @@ import (
 func PIDFilePath() string {
 	dataDir := os.Getenv("XDG_DATA_HOME")
 	if dataDir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			slog.Error("cannot determine home directory; set $HOME or $XDG_DATA_HOME", "error", err)
+			os.Exit(1)
+		}
 		dataDir = filepath.Join(home, ".local", "share")
 	}
 	return filepath.Join(dataDir, "otto", "ottod.pid")

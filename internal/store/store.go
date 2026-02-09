@@ -64,7 +64,7 @@ func WriteDocument(path string, doc *Document) error {
 
 	buf.WriteString(doc.Body)
 
-	return os.WriteFile(path, buf.Bytes(), 0644)
+	return atomicWriteFile(path, buf.Bytes(), 0644)
 }
 
 // ReadBody reads just the body of a markdown file (ignoring frontmatter).
@@ -81,7 +81,17 @@ func WriteBody(path string, body string) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		return fmt.Errorf("creating directory for %s: %w", path, err)
 	}
-	return os.WriteFile(path, []byte(body), 0644)
+	return atomicWriteFile(path, []byte(body), 0644)
+}
+
+// atomicWriteFile writes data to a temp file then renames it into place,
+// preventing partial writes on crash or disk-full.
+func atomicWriteFile(path string, data []byte, perm os.FileMode) error {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, perm); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Exists checks if a file exists.

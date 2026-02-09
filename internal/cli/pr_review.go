@@ -30,7 +30,16 @@ type reviewComment struct {
 var prReviewCmd = &cobra.Command{
 	Use:   "review <url>",
 	Short: "Review a pull request",
-	Args:  cobra.ExactArgs(1),
+	Long: `Perform an LLM-powered code review on a pull request.
+
+Otto clones/checks-out the PR branch, sends the diff and codebase
+context to the LLM, and presents the resulting review comments in a
+table. You then interactively select which comments to post as
+inline review comments on the PR. A summary comment is posted
+automatically.`,
+	Example: `  otto pr review https://github.com/org/repo/pull/42
+  otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		prURL := args[0]

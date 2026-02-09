@@ -1,8 +1,11 @@
 package spec
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -364,6 +367,52 @@ func TestParseJSONStringArray(t *testing.T) {
 			got := parseJSONStringArray(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
+	}
+}
+
+func TestConcurrentUpdateTaskStatus(t *testing.T) {
+	// Build a tasks.md with 8 tasks, all pending.
+	var sb strings.Builder
+	sb.WriteString("# Tasks\n\n")
+	for i := 1; i <= 8; i++ {
+		sb.WriteString(fmt.Sprintf("## Task %d: Task number %d\n", i, i))
+		sb.WriteString(fmt.Sprintf("- **id**: 1.%d\n", i))
+		sb.WriteString("- **status**: pending\n")
+		sb.WriteString(fmt.Sprintf("- **parallel_group**: %d\n", i))
+		sb.WriteString("- **depends_on**: []\n")
+		sb.WriteString(fmt.Sprintf("- **description**: Task %d description\n", i))
+		sb.WriteString("- **files**: []\n\n")
+	}
+
+	dir := t.TempDir()
+	tasksPath := filepath.Join(dir, "tasks.md")
+	require.NoError(t, os.WriteFile(tasksPath, []byte(sb.String()), 0644))
+
+	// Launch 8 goroutines, each updating one task to in-progress.
+	var wg sync.WaitGroup
+	errs := make([]error, 8)
+	for i := 1; i <= 8; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			taskID := fmt.Sprintf("1.%d", idx)
+			errs[idx-1] = UpdateTaskStatus(tasksPath, taskID, TaskStatusRunning)
+		}(i)
+	}
+	wg.Wait()
+
+	// Assert no errors from any goroutine.
+	for i, err := range errs {
+		assert.NoError(t, err, "goroutine %d returned error", i+1)
+	}
+
+	// Re-parse and verify all 8 tasks are now running.
+	tasks, err := ParseTasks(tasksPath)
+	require.NoError(t, err)
+	require.Len(t, tasks, 8)
+
+	for _, task := range tasks {
+		assert.Equal(t, TaskStatusRunning, task.Status, "task %s should be running", task.ID)
 	}
 }
 

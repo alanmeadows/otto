@@ -93,6 +93,16 @@ type SpecConfig struct {
 	MaxParallelTasks int    `json:"max_parallel_tasks"`
 	TaskTimeout      string `json:"task_timeout"`
 	MaxTaskRetries   int    `json:"max_task_retries"`
+	TaskBriefing     *bool  `json:"task_briefing"`
+}
+
+// IsTaskBriefingEnabled returns whether the task briefing step is enabled.
+// Defaults to true when not explicitly set.
+func (s SpecConfig) IsTaskBriefingEnabled() bool {
+	if s.TaskBriefing == nil {
+		return true
+	}
+	return *s.TaskBriefing
 }
 
 // ParseTaskTimeout returns the task timeout as a time.Duration.
@@ -102,6 +112,11 @@ func (s SpecConfig) ParseTaskTimeout() time.Duration {
 		return 30 * time.Minute
 	}
 	return d
+}
+
+// boolPtr returns a pointer to the given bool value.
+func boolPtr(b bool) *bool {
+	return &b
 }
 
 // NotificationsConfig holds notification settings.
@@ -138,6 +153,7 @@ func DefaultConfig() Config {
 			MaxParallelTasks: 4,
 			TaskTimeout:      "30m",
 			MaxTaskRetries:   15,
+			TaskBriefing:     boolPtr(true),
 		},
 	}
 }

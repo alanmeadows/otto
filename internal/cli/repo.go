@@ -15,7 +15,15 @@ import (
 var repoCmd = &cobra.Command{
 	Use:   "repo",
 	Short: "Manage repositories",
-	Long:  `Add, remove, and list tracked repositories.`,
+	Long: `Add, remove, and list tracked repositories.
+
+Otto tracks repositories so it knows where to create worktrees,
+which git strategy to use, and how to name branches. Use 'repo add'
+to register a repository interactively and 'repo list' to inspect
+the current set.`,
+	Example: `  otto repo add my-service
+  otto repo list
+  otto repo remove my-service`,
 }
 
 func init() {
@@ -27,6 +35,14 @@ func init() {
 var repoAddCmd = &cobra.Command{
 	Use:   "add [name]",
 	Short: "Add a repository",
+	Long: `Register a repository for otto to manage.
+
+Launches an interactive form to configure the repository name,
+primary directory, worktree directory, git strategy (worktree,
+branch, or hands-off), and branch naming template. If a name is
+provided as an argument it is pre-filled in the form.`,
+	Example: `  otto repo add
+  otto repo add my-service`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cwd, _ := os.Getwd()
 
@@ -104,7 +120,12 @@ var repoAddCmd = &cobra.Command{
 var repoRemoveCmd = &cobra.Command{
 	Use:   "remove <name>",
 	Short: "Remove a repository",
-	Args:  cobra.ExactArgs(1),
+	Long: `Remove a tracked repository by name.
+
+This only removes the repository from otto's tracking configuration.
+It does not delete the repository directory or any worktrees on disk.`,
+	Example: `  otto repo remove my-service`,
+	Args:    cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
@@ -126,6 +147,11 @@ var repoRemoveCmd = &cobra.Command{
 var repoListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List repositories",
+	Long: `Display all tracked repositories in a table.
+
+Shows the repository name, primary directory, git strategy, and
+branch template for each registered repository.`,
+	Example: `  otto repo list`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		configDir, err := os.UserConfigDir()
 		if err != nil {

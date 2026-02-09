@@ -10,7 +10,15 @@ import (
 var serverCmd = &cobra.Command{
 	Use:   "server",
 	Short: "Manage the otto daemon",
-	Long:  `Start, stop, and manage the otto background daemon.`,
+	Long: `Start, stop, and manage the otto background daemon.
+
+The daemon runs an HTTP API and periodically polls tracked PRs for
+new review comments. It can be run in the foreground for debugging
+or installed as a systemd user service for persistent operation.`,
+	Example: `  otto server start
+  otto server start --foreground --port 9090
+  otto server status
+  otto server stop`,
 }
 
 var foregroundFlag bool
@@ -29,6 +37,14 @@ func init() {
 var serverStartCmd = &cobra.Command{
 	Use:   "start",
 	Short: "Start the otto daemon",
+	Long: `Start the otto daemon process.
+
+By default the daemon forks into the background. Use --foreground
+to run in the current terminal (useful for debugging). The port
+defaults to the config value or 4097.`,
+	Example: `  otto server start
+  otto server start --foreground
+  otto server start --port 9090`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := portFlag
 		if port == 0 {
@@ -46,6 +62,11 @@ var serverStartCmd = &cobra.Command{
 var serverStopCmd = &cobra.Command{
 	Use:   "stop",
 	Short: "Stop the otto daemon",
+	Long: `Stop the running otto daemon process.
+
+Sends a shutdown signal to the daemon identified by its PID file.
+Returns an error if no daemon is currently running.`,
+	Example: `  otto server stop`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if err := server.StopDaemon(); err != nil {
 			return err
@@ -58,6 +79,11 @@ var serverStopCmd = &cobra.Command{
 var serverStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
+	Long: `Show whether the otto daemon is running.
+
+Displays the PID and uptime if the daemon is active, or reports
+that it is not running.`,
+	Example: `  otto server status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		running, pid, uptime, err := server.DaemonStatus()
 		if err != nil {
@@ -76,6 +102,12 @@ var serverStatusCmd = &cobra.Command{
 var serverInstallCmd = &cobra.Command{
 	Use:   "install",
 	Short: "Install as systemd user service",
+	Long: `Install the otto daemon as a systemd user service.
+
+Creates a systemd unit file under ~/.config/systemd/user/ so the
+daemon starts automatically on login. Use 'systemctl --user' to
+manage the service after installation.`,
+	Example: `  otto server install`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return server.InstallSystemdService()
 	},

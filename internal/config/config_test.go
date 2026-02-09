@@ -201,3 +201,54 @@ func TestDefaultConfigHasUsername(t *testing.T) {
 		t.Errorf("expected default username=opencode, got %s", cfg.OpenCode.Username)
 	}
 }
+
+func TestLoadMergesUserAndOverride(t *testing.T) {
+	// Create a temp dir for user config via XDG_CONFIG_HOME.
+	userConfigDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", userConfigDir)
+
+	// Prevent repo-level config from interfering (run from a non-git dir).
+	t.Setenv("GIT_CEILING_DIRECTORIES", t.TempDir())
+
+	// Clear env vars that would override config fields.
+	t.Setenv("OTTO_ADO_PAT", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	t.Setenv("OPENCODE_SERVER_PASSWORD", "")
+	t.Setenv("OPENCODE_SERVER_USERNAME", "")
+
+	// Write user-level config.
+	ottoDir := filepath.Join(userConfigDir, "otto")
+	if err := os.MkdirAll(ottoDir, 0755); err != nil {
+		t.Fatalf("failed to create otto config dir: %v", err)
+	}
+	userConfig := []byte(`{"models":{"primary":"user-model"},"server":{"port":5555}}`)
+	if err := os.WriteFile(filepath.Join(ottoDir, "otto.jsonc"), userConfig, 0644); err != nil {
+		t.Fatalf("failed to write user config: %v", err)
+	}
+
+	// Write override config (simulates repo-level override).
+	overrideDir := t.TempDir()
+	overridePath := filepath.Join(overrideDir, "override.jsonc")
+	overrideConfig := []byte(`{"models":{"primary":"repo-model"}}`)
+	if err := os.WriteFile(overridePath, overrideConfig, 0644); err != nil {
+		t.Fatalf("failed to write override config: %v", err)
+	}
+
+	cfg, err := Load(overridePath)
+	if err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+
+	// Override wins for models.primary.
+	if cfg.Models.Primary != "repo-model" {
+		t.Errorf("expected models.primary=repo-model, got %s", cfg.Models.Primary)
+	}
+	// User value preserved for server.port (override didn't set it).
+	if cfg.Server.Port != 5555 {
+		t.Errorf("expected server.port=5555, got %d", cfg.Server.Port)
+	}
+	// Defaults preserved for fields neither user nor override set.
+	if cfg.Models.Secondary != "openai/o3" {
+		t.Errorf("expected models.secondary=openai/o3, got %s", cfg.Models.Secondary)
+	}
+}

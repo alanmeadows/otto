@@ -12,6 +12,7 @@ import (
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/store"
 )
 
@@ -89,9 +90,26 @@ func RunTask(
 		_ = UpdateTaskStatus(spec.TasksPath, task.ID, TaskStatusFailed)
 		return fmt.Errorf("creating session: %w", err)
 	}
+	defer func() {
+		if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
+			slog.Warn("failed to delete session", "error", err)
+		}
+	}()
 
 	// Build task execution prompt.
-	prompt := buildTaskPrompt(spec, task, previousError)
+	var prompt string
+	if cfg.Spec.IsTaskBriefingEnabled() {
+		slog.Info("generating task briefing", "task", task.ID)
+		brief, briefErr := briefTask(ctx, client, cfg, repoDir, spec, task)
+		if briefErr != nil {
+			slog.Warn("task briefing failed, falling back to static prompt", "task", task.ID, "error", briefErr)
+			prompt = buildTaskPrompt(spec, task, previousError)
+		} else {
+			prompt = buildBriefedPrompt(spec, task, brief, previousError)
+		}
+	} else {
+		prompt = buildTaskPrompt(spec, task, previousError)
+	}
 
 	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
 
@@ -99,7 +117,6 @@ func RunTask(
 	_, err = client.SendPrompt(ctx, session.ID, prompt, primaryModel, repoDir)
 	if err != nil {
 		_ = UpdateTaskStatus(spec.TasksPath, task.ID, TaskStatusFailed)
-		_ = client.DeleteSession(ctx, session.ID, repoDir)
 		return fmt.Errorf("executing task: %w", err)
 	}
 
@@ -124,11 +141,6 @@ func RunTask(
 	// Mark as completed.
 	if err := UpdateTaskStatus(spec.TasksPath, task.ID, TaskStatusCompleted); err != nil {
 		return fmt.Errorf("marking task as completed: %w", err)
-	}
-
-	// Delete session.
-	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
-		slog.Warn("failed to delete session", "error", err)
 	}
 
 	slog.Info("task completed", "id", task.ID, "title", task.Title)
@@ -183,6 +195,111 @@ func buildTaskPrompt(spec *Spec, task *Task, previousError string) string {
 		buf.WriteString(phaseSummaries)
 		buf.WriteString("\n\n")
 	}
+
+	// Previous error context for retries.
+	if previousError != "" {
+		buf.WriteString("## Previous Attempt Failed\n\n")
+		buf.WriteString("The previous attempt at this task failed with the following error. Fix the issue and complete the task:\n\n")
+		buf.WriteString(previousError)
+		buf.WriteString("\n\n")
+	}
+
+	buf.WriteString("Complete this task. Make all necessary code changes.\n")
+
+	return buf.String()
+}
+
+// briefTask generates a focused implementation brief for a task using an LLM call.
+// It reads all spec artifacts, renders the task-briefing.md template, and sends the
+// prompt to the primary model. The returned brief replaces the verbose context dump
+// that buildTaskPrompt produces, giving the executor a distilled, task-specific prompt.
+//
+// The brief includes pointers back to requirements.md, design.md, etc. so the executor
+// can explore further if needed.
+func briefTask(
+	ctx context.Context,
+	client opencode.LLMClient,
+	cfg *config.Config,
+	repoDir string,
+	spec *Spec,
+	task *Task,
+) (string, error) {
+	requirementsMD := readArtifact(spec.RequirementsPath)
+	researchMD := readArtifact(spec.ResearchPath)
+	designMD := readArtifact(spec.DesignPath)
+	tasksMD := readArtifact(spec.TasksPath)
+	phaseSummaries := readPhaseSummaries(spec)
+
+	data := map[string]string{
+		"requirements_md":  requirementsMD,
+		"research_md":      researchMD,
+		"design_md":        designMD,
+		"tasks_md":         tasksMD,
+		"task_id":          task.ID,
+		"task_title":       task.Title,
+		"task_description": task.Description,
+	}
+
+	if len(task.Files) > 0 {
+		data["task_files"] = strings.Join(task.Files, ", ")
+	}
+
+	if len(task.DependsOn) > 0 {
+		data["task_depends_on"] = strings.Join(task.DependsOn, ", ")
+	}
+
+	if phaseSummaries != "" {
+		data["phase_summaries"] = phaseSummaries
+	}
+
+	rendered, err := prompts.Execute("task-briefing.md", data)
+	if err != nil {
+		return "", fmt.Errorf("rendering task-briefing template: %w", err)
+	}
+
+	session, err := client.CreateSession(ctx, fmt.Sprintf("brief-%s", task.ID), repoDir)
+	if err != nil {
+		return "", fmt.Errorf("creating briefing session: %w", err)
+	}
+	defer func() {
+		if delErr := client.DeleteSession(ctx, session.ID, repoDir); delErr != nil {
+			slog.Warn("failed to delete briefing session", "error", delErr)
+		}
+	}()
+
+	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
+	resp, err := client.SendPrompt(ctx, session.ID, rendered, primaryModel, repoDir)
+	if err != nil {
+		return "", fmt.Errorf("briefing LLM call: %w", err)
+	}
+
+	brief := strings.TrimSpace(resp.Content)
+	if brief == "" {
+		return "", fmt.Errorf("briefing LLM returned empty response")
+	}
+
+	slog.Info("generated task briefing", "task", task.ID, "brief_length", len(brief))
+	return brief, nil
+}
+
+// buildBriefedPrompt wraps a task briefing into the final executor prompt.
+// It includes the brief plus pointers to the spec artifacts and any previous error context.
+func buildBriefedPrompt(spec *Spec, task *Task, brief string, previousError string) string {
+	var buf strings.Builder
+
+	buf.WriteString("You are executing a development task. A senior engineer has prepared a detailed implementation brief for you.\n\n")
+
+	buf.WriteString("## Implementation Brief\n\n")
+	buf.WriteString(brief)
+	buf.WriteString("\n\n")
+
+	buf.WriteString("## Reference Documents\n\n")
+	buf.WriteString("If you need additional context beyond this brief, the following spec documents are available in the repository:\n\n")
+	buf.WriteString(fmt.Sprintf("- **Requirements**: `%s`\n", spec.RequirementsPath))
+	buf.WriteString(fmt.Sprintf("- **Research**: `%s`\n", spec.ResearchPath))
+	buf.WriteString(fmt.Sprintf("- **Design**: `%s`\n", spec.DesignPath))
+	buf.WriteString(fmt.Sprintf("- **Tasks**: `%s`\n", spec.TasksPath))
+	buf.WriteString("\nRead these files if you need deeper context on requirements, design decisions, or adjacent tasks.\n\n")
 
 	// Previous error context for retries.
 	if previousError != "" {

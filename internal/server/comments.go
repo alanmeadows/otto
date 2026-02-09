@@ -159,6 +159,9 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 
 // readCodeContext reads surrounding lines from a file in the work directory.
 func readCodeContext(workDir, filePath string, line, radius int) string {
+	if filePath == "" || line <= 0 {
+		return ""
+	}
 	fullPath := filepath.Join(workDir, filePath)
 	data, err := os.ReadFile(fullPath)
 	if err != nil {

@@ -41,7 +41,11 @@ type PRDocument struct {
 func PRDir() string {
 	dataDir := os.Getenv("XDG_DATA_HOME")
 	if dataDir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			slog.Error("cannot determine home directory; set $HOME or $XDG_DATA_HOME", "error", err)
+			os.Exit(1)
+		}
 		dataDir = filepath.Join(home, ".local", "share")
 	}
 	return filepath.Join(dataDir, "otto", "prs")
@@ -203,7 +207,7 @@ func InferPR() (*PRDocument, error) {
 // FixPR attempts to fix a failing PR using a two-phase LLM approach.
 // Phase 1: Analyze build logs to produce a structured diagnosis.
 // Phase 2: Apply fixes based on the diagnosis.
-func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) (retErr error) {
 	slog.Info("starting PR fix", "prID", pr.ID, "attempt", pr.FixAttempts+1)
 
 	// Set status to "fixing" to prevent concurrent fix attempts.
@@ -211,6 +215,16 @@ func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serv
 	if err := SavePR(pr); err != nil {
 		return fmt.Errorf("setting fix status: %w", err)
 	}
+
+	// On error, roll status back to "watching" so the monitoring loop retries.
+	defer func() {
+		if retErr != nil && pr.Status == "fixing" {
+			pr.Status = "watching"
+			if saveErr := SavePR(pr); saveErr != nil {
+				slog.Error("failed to rollback PR status from fixing", "prID", pr.ID, "error", saveErr)
+			}
+		}
+	}()
 
 	// Map PR to local worktree.
 	workDir, cleanup, err := repo.MapPRToWorkDir(cfg, pr.URL, pr.Branch)
@@ -490,7 +504,9 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 		case "succeeded":
 			pr.Status = "green"
 			pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
-			_ = backend.PostComment(ctx, prInfo, "otto: All pipelines passed! ✅")
+			if err := backend.PostComment(ctx, prInfo, "otto: All pipelines passed! ✅"); err != nil {
+				slog.Warn("failed to post green status comment", "prID", pr.ID, "error", err)
+			}
 			if err := Notify(ctx, &cfg.Notifications, NotificationPayload{
 				Event:  EventPRGreen,
 				Title:  pr.Title,
@@ -539,15 +555,16 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 		// Reload PR from disk to get updates from evaluateComment.
 		reloaded, loadErr := LoadPR(pr.Provider, pr.ID)
 		if loadErr != nil {
-			slog.Warn("failed to reload PR after comments", "error", loadErr)
-		} else {
-			pr = reloaded
+			return fmt.Errorf("failed to reload PR after comment processing: %w", loadErr)
 		}
+		pr = reloaded
 	}
 
 	// 3. ADO MerlinBot handling — only when new comments found.
 	if pr.Provider == "ado" && newCommentCount > 0 {
-		_ = backend.RunWorkflow(ctx, prInfo, provider.WorkflowAddressBot)
+		if err := backend.RunWorkflow(ctx, prInfo, provider.WorkflowAddressBot); err != nil {
+			slog.Warn("failed to run MerlinBot workflow", "prID", pr.ID, "error", err)
+		}
 	}
 
 	// 4. Notify if comments were handled.

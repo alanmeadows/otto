@@ -11,7 +11,14 @@ import (
 var specTaskCmd = &cobra.Command{
 	Use:   "task",
 	Short: "Manage specification tasks",
-	Long:  `Generate, list, add, and run tasks from a specification's design document.`,
+	Long: `Generate, list, add, and run tasks from a specification's design document.
+
+Tasks are the executable units of work derived from a spec's design.
+They track status (pending, running, completed, failed, skipped) and
+respect dependency ordering via parallel groups.`,
+	Example: `  otto spec task generate --spec add-retry-logic
+  otto spec task list --spec add-retry-logic
+  otto spec task run --spec add-retry-logic --id 3.1`,
 }
 
 // taskSpecSlugFlag is the --spec flag for task subcommands.
@@ -36,6 +43,13 @@ func init() {
 var specTaskGenerateCmd = &cobra.Command{
 	Use:   "generate",
 	Short: "Generate tasks from design",
+	Long: `Generate a task list from the specification's design document.
+
+The LLM breaks the design into discrete, ordered tasks written to
+tasks.md. Existing tasks are overwritten. Use --spec to target
+a specific spec when multiple exist.`,
+	Example: `  otto spec task generate
+  otto spec task generate --spec add-retry-logic`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, mgr, err := newLLMClient(appConfig)
 		if err != nil {
@@ -61,6 +75,13 @@ var specTaskGenerateCmd = &cobra.Command{
 var specTaskListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List tasks and their status",
+	Long: `Display all tasks for a specification with their current status.
+
+Shows task ID, status icon, parallel group, and title. Also lists
+which tasks are currently runnable based on dependency ordering.
+Use --spec to target a specific spec when multiple exist.`,
+	Example: `  otto spec task list
+  otto spec task list --spec add-retry-logic`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		repoDir := config.RepoRoot()
 		if repoDir == "" {
@@ -114,7 +135,14 @@ var specTaskListCmd = &cobra.Command{
 var specTaskAddCmd = &cobra.Command{
 	Use:   "add <prompt>",
 	Short: "Add a manual task",
-	Args:  cobra.ExactArgs(1),
+	Long: `Add a manually defined task to a specification's task list.
+
+The LLM formats the prompt into a task entry and appends it to
+tasks.md. Use this to inject tasks that were not generated
+automatically. Use --spec to target a specific spec.`,
+	Example: `  otto spec task add "Write unit tests for the retry module"
+  otto spec task add --spec add-retry-logic "Add integration test"`,
+	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, mgr, err := newLLMClient(appConfig)
 		if err != nil {
@@ -140,6 +168,13 @@ var specTaskAddCmd = &cobra.Command{
 var specTaskRunCmd = &cobra.Command{
 	Use:   "run",
 	Short: "Run a specific task",
+	Long: `Run a single task from the specification's task list.
+
+If --id is omitted and only one task is runnable, it is selected
+automatically. The task's status is updated on completion or failure.
+Use --spec to target a specific spec when multiple exist.`,
+	Example: `  otto spec task run --id 3.1
+  otto spec task run --spec add-retry-logic --id 3.1`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		client, mgr, err := newLLMClient(appConfig)
 		if err != nil {

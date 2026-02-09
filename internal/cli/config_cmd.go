@@ -16,7 +16,15 @@ import (
 var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Manage otto configuration",
-	Long:  `Show and modify otto configuration values.`,
+	Long: `Show and modify otto configuration values.
+
+Otto merges configuration from several layers: built-in defaults,
+~/.config/otto/otto.jsonc (user), and .otto/otto.jsonc (repo-local).
+Use 'config show' to inspect the merged result and 'config set' to
+write values to the repo-local file.`,
+	Example: `  otto config show
+  otto config show --json
+  otto config set models.primary "anthropic/claude-sonnet-4-20250514"`,
 }
 
 var configJSONFlag bool
@@ -30,6 +38,14 @@ func init() {
 var configShowCmd = &cobra.Command{
 	Use:   "show",
 	Short: "Show merged configuration",
+	Long: `Display the fully merged otto configuration as JSON.
+
+All layers (defaults, user, repo-local) are merged and the result is
+printed. Sensitive values such as tokens and webhook URLs are redacted.
+Use --json for machine-readable compact output.`,
+	Example: `  otto config show
+  otto config show --json
+  otto config show --json | jq '.models'`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		cfg := appConfig
 		if cfg == nil {
@@ -97,12 +113,11 @@ var configSetCmd = &cobra.Command{
 	Long: `Set a configuration value using a dotted key path.
 
 The value is written to .otto/otto.jsonc in the repository root.
-The file is created if it does not exist.
+The file is created if it does not exist. Values are auto-detected
+as bool, integer, float, or string.
 
-Note: JSONC comments are not preserved on write.
-
-Examples:
-  otto config set models.primary "anthropic/claude-sonnet-4-20250514"
+Note: JSONC comments are not preserved on write.`,
+	Example: `  otto config set models.primary "anthropic/claude-sonnet-4-20250514"
   otto config set server.port 8080
   otto config set opencode.auto_start true`,
 	Args: cobra.ExactArgs(2),

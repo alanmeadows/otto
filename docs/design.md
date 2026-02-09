@@ -1724,7 +1724,6 @@ Otto reads and writes markdown with YAML frontmatter. Key libraries:
 |---------|---------|
 | `github.com/adrg/frontmatter` | Parse YAML frontmatter from markdown |
 | `gopkg.in/yaml.v3` | YAML serialization for frontmatter |
-| `github.com/yuin/goldmark` | Markdown parsing (for section extraction/update) |
 | `github.com/tidwall/jsonc` | JSONC parsing for config files |
 
 ---
@@ -1819,13 +1818,19 @@ otto/
 | `github.com/spf13/cobra` | CLI framework |
 | `github.com/sst/opencode-sdk-go` | OpenCode Go SDK (sessions, prompts, events) |
 | `github.com/adrg/frontmatter` | YAML frontmatter parsing |
-| `github.com/yuin/goldmark` | Markdown parsing/rendering |
 | `gopkg.in/yaml.v3` | YAML serialization |
 | `github.com/tidwall/jsonc` | JSONC config file parsing |
+| `github.com/tidwall/sjson` | JSON path manipulation |
 | `github.com/charmbracelet/log` | Structured logging |
 | `github.com/charmbracelet/lipgloss` | CLI output styling |
 | `github.com/charmbracelet/huh` | Interactive prompts (PR review comment approval) |
-| `github.com/google/go-github/v60` | GitHub REST API client |
+| `github.com/google/go-github/v82` | GitHub REST API client |
+| `github.com/shurcooL/githubv4` | GitHub GraphQL API client |
+| `github.com/gofri/go-github-ratelimit/v2` | GitHub API rate-limit handling |
+| `github.com/gofrs/flock` | File locking for concurrent access |
+| `dario.cat/mergo` | Deep merge for config layering |
+| `golang.org/x/oauth2` | OAuth2 token transport |
+| `github.com/stretchr/testify` | Test assertions and mocks |
 
 ---
 
@@ -1898,3 +1903,14 @@ otto/
 2. **Spec artifact format stability** — The tasks.md format (YAML frontmatter vs inline metadata) needs validation through real usage. The current inline approach is simpler to parse but less structured.
 
 3. **Notification / alerting** — User wants Teams notifications (direct message, not group) when PRs go green, otto gives up, or spec execution completes. Research needed: Teams incoming webhooks, Graph API personal chat, or Power Automate integration. Authentication and token requirements are unclear — this needs a research spike.
+
+## Implementation Notes
+
+Key learnings and patterns established during implementation:
+
+- **File locking** — Concurrent access to shared state files (tasks.md, PR docs) uses `gofrs/flock` via `store.WithLock`. Advisory locks acquired with a 30-second timeout prevent data races between parallel tasks and the daemon.
+- **Atomic file writes** — All store writes use temp-file-plus-rename to prevent corruption on crash or concurrent read. The temp file is written in the same directory, then atomically renamed over the target.
+- **PR monitoring architecture** — PR monitoring uses a poll-based loop (`server/pr_loop.go`), not webhooks. Each cycle fetches PR status and comments via the provider API. This avoids inbound networking requirements and works behind firewalls.
+- **Notifications** — Teams/chat notifications use Power Automate webhook integration with Adaptive Card payloads (`server/notify.go`). No direct Graph API or Teams SDK dependency.
+- **Session cleanup** — OpenCode sessions are deleted via deferred deletes after log collection to prevent session accumulation on the server. Every workflow path that creates a session is responsible for cleaning it up.
+- **Git command timeouts** — All `git` shell-outs use `exec.CommandContext` with context-based timeouts (10–30 seconds depending on operation) to prevent hangs on network issues or lock contention.

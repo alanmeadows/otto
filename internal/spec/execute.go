@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/opencode"
@@ -724,12 +725,14 @@ func collectPhaseLogs(historyDir string, baseline int) string {
 
 // gitDiff returns uncommitted changes relative to HEAD.
 func gitDiff(repoDir string) (string, error) {
-	cmd := exec.Command("git", "diff", "HEAD")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "diff", "HEAD")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
 		// If HEAD doesn't exist (no commits yet), fall back to plain diff.
-		cmd2 := exec.Command("git", "diff")
+		cmd2 := exec.CommandContext(ctx, "git", "diff")
 		cmd2.Dir = repoDir
 		out2, err2 := cmd2.Output()
 		if err2 != nil {
@@ -742,10 +745,13 @@ func gitDiff(repoDir string) (string, error) {
 
 // gitHasChanges returns true if the working directory has uncommitted changes.
 func gitHasChanges(repoDir string) bool {
-	cmd := exec.Command("git", "status", "--porcelain")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	if err != nil {
+		slog.Warn("git status failed, assuming no changes", "error", err)
 		return false
 	}
 	return strings.TrimSpace(string(out)) != ""
@@ -753,13 +759,15 @@ func gitHasChanges(repoDir string) bool {
 
 // gitCommit stages all changes and commits with the given message.
 func gitCommit(repoDir string, message string) error {
-	add := exec.Command("git", "add", "-A")
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	add := exec.CommandContext(ctx, "git", "add", "-A")
 	add.Dir = repoDir
 	if out, err := add.CombinedOutput(); err != nil {
 		return fmt.Errorf("git add: %s: %w", string(out), err)
 	}
 
-	commit := exec.Command("git", "commit", "-m", message)
+	commit := exec.CommandContext(ctx, "git", "commit", "-m", message)
 	commit.Dir = repoDir
 	if out, err := commit.CombinedOutput(); err != nil {
 		return fmt.Errorf("git commit: %s: %w", string(out), err)

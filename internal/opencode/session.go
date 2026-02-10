@@ -39,6 +39,18 @@ func (s *SDKLLMClient) CreateSession(ctx context.Context, title string, director
 }
 
 // promptResult carries the outcome from Session.Prompt() executed in a goroutine.
+//
+// IMPORTANT: The OpenCode SDK's SessionPromptParams has a NoReply field.
+// Setting NoReply=true means "do NOT generate an LLM reply at all" — the prompt is
+// stored as a user message but the LLM never processes it. It does NOT mean "return
+// the HTTP response immediately and process asynchronously." This was verified
+// empirically: with NoReply=true, only 1 message (user) appeared in the session
+// after 8+ minutes; the LLM never ran.
+//
+// Instead, we use a racing goroutines pattern: Session.Prompt() runs in one goroutine
+// (blocking HTTP call) while Event.ListStreaming() monitors SSE events in another.
+// If session.idle fires before Prompt() returns, we cancel the stuck HTTP call and
+// fetch the response via Session.Messages().
 type promptResult struct {
 	resp *opencode.SessionPromptResponse
 	err  error
@@ -53,6 +65,11 @@ func (s *SDKLLMClient) SendPrompt(ctx context.Context, sessionID string, prompt 
 
 	// Step 1: Start SSE event stream BEFORE sending the prompt so we don't miss
 	// the session.idle event. The stream is scoped to the directory.
+	//
+	// TODO: Each SendPrompt call opens its own SSE connection. For workloads with
+	// many sequential prompts (e.g. the ReviewPipeline's generate→critique→refine
+	// cycle), consider sharing a single long-lived SSE connection across the
+	// process or SDKLLMClient lifetime to reduce connection overhead.
 	eventStream := s.client.Event.ListStreaming(ctx, opencode.EventListParams{
 		Directory: opencode.F(directory),
 	})
@@ -149,7 +166,19 @@ func (s *SDKLLMClient) SendPrompt(ctx context.Context, sessionID string, prompt 
 		case result := <-promptCh:
 			// The blocking Prompt() call returned normally.
 			if result.err != nil {
-				return nil, fmt.Errorf("sending prompt: %w", result.err)
+				// Race condition guard: the LLM may have finished successfully
+				// (session.idle emitted) but the HTTP response was empty/broken
+				// (EOF). Both channels become ready simultaneously and Go's
+				// select picks randomly. Check if idleCh has data before giving up.
+				select {
+				case <-idleCh:
+					slog.Info("Prompt() returned error but session.idle detected, fetching response from messages",
+						"session", sessionID, "prompt_error", result.err)
+					cancel()
+					return s.fetchLatestResponse(context.Background(), sessionID, directory)
+				default:
+					return nil, fmt.Errorf("sending prompt: %w", result.err)
+				}
 			}
 			slog.Debug("Prompt() returned normally", "session", sessionID)
 			content := extractTextContent(result.resp)

@@ -17,8 +17,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
 		t.Errorf("expected secondary model github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
-	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro" {
-		t.Errorf("expected tertiary model github-copilot/gemini-3-pro, got %s", cfg.Models.Tertiary)
+	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro-preview" {
+		t.Errorf("expected tertiary model github-copilot/gemini-3-pro-preview, got %s", cfg.Models.Tertiary)
 	}
 	if cfg.PR.MaxFixAttempts != 5 {
 		t.Errorf("expected max_fix_attempts 5, got %d", cfg.PR.MaxFixAttempts)
@@ -181,8 +181,8 @@ func TestMergeDeepPreservesNestedFields(t *testing.T) {
 	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
 		t.Errorf("expected secondary preserved as github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
-	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro" {
-		t.Errorf("expected tertiary preserved as github-copilot/gemini-3-pro, got %s", cfg.Models.Tertiary)
+	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro-preview" {
+		t.Errorf("expected tertiary preserved as github-copilot/gemini-3-pro-preview, got %s", cfg.Models.Tertiary)
 	}
 	if cfg.Server.Port != 4097 {
 		t.Errorf("expected server.port preserved as 4097, got %d", cfg.Server.Port)

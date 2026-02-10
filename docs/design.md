@@ -260,7 +260,7 @@ Example — user config sets all models; repo config overrides only the primary 
   "models": {
     "primary": "github-copilot/claude-opus-4.6",  // From repo
     "secondary": "github-copilot/gpt-5.2-codex",                          // From user
-    "tertiary": "github-copilot/gemini-3-pro"                // From user
+    "tertiary": "github-copilot/gemini-3-pro-preview"                // From user
   }
 }
 ```
@@ -277,7 +277,7 @@ Arrays are **replaced**, not merged — e.g., if repo config defines `repos`, it
   "models": {
     "primary": "github-copilot/claude-opus-4.6",   // Main workhorse
     "secondary": "github-copilot/gpt-5.2-codex",                          // Critical reviewer (required)
-    "tertiary": "github-copilot/gemini-3-pro"                // Optional third reviewer
+    "tertiary": "github-copilot/gemini-3-pro-preview"                // Optional third reviewer
   },
 
   // --- OpenCode ---

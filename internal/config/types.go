@@ -131,7 +131,7 @@ func DefaultConfig() Config {
 		Models: ModelsConfig{
 			Primary:   "github-copilot/claude-opus-4.6",
 			Secondary: "github-copilot/gpt-5.2-codex",
-			Tertiary:  "github-copilot/gemini-3-pro",
+			Tertiary:  "github-copilot/gemini-3-pro-preview",
 		},
 		OpenCode: OpenCodeConfig{
 			URL:         "http://localhost:4096",

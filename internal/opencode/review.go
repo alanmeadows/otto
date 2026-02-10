@@ -105,6 +105,14 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 	return artifact, nil
 }
 
+// noToolsInstruction is appended to all review-pipeline prompts to prevent the
+// LLM from writing files directly via OpenCode tools. The review pipeline
+// expects the artifact as response text — if the LLM writes files instead,
+// we capture only a summary and the actual content gets overwritten.
+const noToolsInstruction = `
+
+CRITICAL: Return ALL output directly in your response text. Do NOT use any file editing tools, shell commands, or other tools — your response text IS the deliverable. Do not write, create, or modify any files.`
+
 // generate creates an artifact using the given model.
 func (p *ReviewPipeline) generate(ctx context.Context, model ModelRef, prompt string) (string, error) {
 	session, err := p.client.CreateSession(ctx, "generate", p.directory)
@@ -113,7 +121,7 @@ func (p *ReviewPipeline) generate(ctx context.Context, model ModelRef, prompt st
 	}
 	defer p.client.DeleteSession(ctx, session.ID, p.directory)
 
-	resp, err := p.client.SendPrompt(ctx, session.ID, prompt, model, p.directory)
+	resp, err := p.client.SendPrompt(ctx, session.ID, prompt+noToolsInstruction, model, p.directory)
 	if err != nil {
 		return "", err
 	}
@@ -140,7 +148,7 @@ func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact 
 		reviewPrompt = fmt.Sprintf("Critically review the following artifact. Identify gaps, errors, inconsistencies, missing considerations, and areas for improvement. Be specific and actionable.\n\n---\n\n%s", artifact)
 	}
 
-	resp, err := p.client.SendPrompt(ctx, session.ID, reviewPrompt, model, p.directory)
+	resp, err := p.client.SendPrompt(ctx, session.ID, reviewPrompt+noToolsInstruction, model, p.directory)
 	if err != nil {
 		return "", err
 	}
@@ -169,7 +177,7 @@ func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, c
 		prompt += fmt.Sprintf("\n\n## Review Feedback #2\n\n%s", critique2)
 	}
 
-	prompt += "\n\n## Instructions\n\nProduce the complete, final version of the artifact incorporating all valid feedback. Output ONLY the artifact content — no preamble, no commentary."
+	prompt += "\n\n## Instructions\n\nProduce the complete, final version of the artifact incorporating all valid feedback. Output ONLY the artifact content — no preamble, no commentary." + noToolsInstruction
 
 	resp, err := p.client.SendPrompt(ctx, session.ID, prompt, model, p.directory)
 	if err != nil {

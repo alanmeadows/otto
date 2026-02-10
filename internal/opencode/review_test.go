@@ -217,10 +217,10 @@ func TestReviewPipeline_TwoCycles(t *testing.T) {
 }
 
 func TestModelRef_ParseAndString(t *testing.T) {
-	ref := ParseModelRef("anthropic/claude-sonnet-4-20250514")
-	assert.Equal(t, "anthropic", ref.ProviderID)
-	assert.Equal(t, "claude-sonnet-4-20250514", ref.ModelID)
-	assert.Equal(t, "anthropic/claude-sonnet-4-20250514", ref.String())
+	ref := ParseModelRef("github-copilot/claude-opus-4.6")
+	assert.Equal(t, "github-copilot", ref.ProviderID)
+	assert.Equal(t, "claude-opus-4.6", ref.ModelID)
+	assert.Equal(t, "github-copilot/claude-opus-4.6", ref.String())
 
 	ref2 := ParseModelRef("just-model")
 	assert.Equal(t, "", ref2.ProviderID)

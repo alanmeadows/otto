@@ -242,25 +242,25 @@ Example — user config sets all models; repo config overrides only the primary 
 // ~/.config/otto/otto.jsonc (user)
 {
   "models": {
-    "primary": "anthropic/claude-sonnet-4-20250514",
-    "secondary": "openai/o3",
-    "tertiary": "google/gemini-2.5-pro"
+    "primary": "github-copilot/claude-opus-4.6",
+    "secondary": "github-copilot/gpt-5.2-codex",
+    "tertiary": "github-copilot/gemini-3-pro"
   }
 }
 
 // .otto/otto.jsonc (repo)
 {
   "models": {
-    "primary": "anthropic/claude-sonnet-4-20250514"  // Override only primary
+    "primary": "github-copilot/claude-opus-4.6"  // Override only primary
   }
 }
 
 // Merged result:
 {
   "models": {
-    "primary": "anthropic/claude-sonnet-4-20250514",  // From repo
-    "secondary": "openai/o3",                          // From user
-    "tertiary": "google/gemini-2.5-pro"                // From user
+    "primary": "github-copilot/claude-opus-4.6",  // From repo
+    "secondary": "github-copilot/gpt-5.2-codex",                          // From user
+    "tertiary": "github-copilot/gemini-3-pro"                // From user
   }
 }
 ```
@@ -275,9 +275,9 @@ Arrays are **replaced**, not merged — e.g., if repo config defines `repos`, it
   // All LLM interactions use the multi-model review pipeline.
   // Models are specified in OpenCode provider/model format.
   "models": {
-    "primary": "anthropic/claude-sonnet-4-20250514",   // Main workhorse
-    "secondary": "openai/o3",                          // Critical reviewer (required)
-    "tertiary": "google/gemini-2.5-pro"                // Optional third reviewer
+    "primary": "github-copilot/claude-opus-4.6",   // Main workhorse
+    "secondary": "github-copilot/gpt-5.2-codex",                          // Critical reviewer (required)
+    "tertiary": "github-copilot/gemini-3-pro"                // Optional third reviewer
   },
 
   // --- OpenCode ---
@@ -444,8 +444,8 @@ response, _ := client.Session.Prompt(ctx, session.ID, opencode.SessionPromptPara
         },
     }),
     Model: opencode.F(opencode.SessionPromptParamsModel{
-        ProviderID: opencode.F("anthropic"),
-        ModelID:    opencode.F("claude-sonnet-4-20250514"),
+        ProviderID: opencode.F("github-copilot"),
+        ModelID:    opencode.F("claude-opus-4.6"),
     }),
     Directory: opencode.F(worktreeDir),  // <-- same directory scope
 })
@@ -591,8 +591,8 @@ A core requirement: almost all LLM-generated artifacts pass through a multi-mode
 ```go
 type ReviewPipeline struct {
     client    *opencode.Client
-    primary   ModelRef   // e.g. anthropic/claude-sonnet-4-20250514
-    secondary ModelRef   // e.g. openai/o3
+    primary   ModelRef   // e.g. github-copilot/claude-opus-4.6
+    secondary ModelRef   // e.g. github-copilot/gpt-5.2-codex
     tertiary  *ModelRef  // optional
 }
 

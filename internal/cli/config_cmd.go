@@ -24,7 +24,7 @@ Use 'config show' to inspect the merged result and 'config set' to
 write values to the repo-local file.`,
 	Example: `  otto config show
   otto config show --json
-  otto config set models.primary "anthropic/claude-sonnet-4-20250514"`,
+  otto config set models.primary "github-copilot/claude-opus-4.6"`,
 }
 
 var configJSONFlag bool
@@ -117,7 +117,7 @@ The file is created if it does not exist. Values are auto-detected
 as bool, integer, float, or string.
 
 Note: JSONC comments are not preserved on write.`,
-	Example: `  otto config set models.primary "anthropic/claude-sonnet-4-20250514"
+	Example: `  otto config set models.primary "github-copilot/claude-opus-4.6"
   otto config set server.port 8080
   otto config set opencode.auto_start true`,
 	Args: cobra.ExactArgs(2),

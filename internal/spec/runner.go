@@ -79,6 +79,8 @@ func RunTask(
 		return fmt.Errorf("marking task as running: %w", err)
 	}
 
+	fmt.Fprintf(os.Stderr, "  ▶ %s: %s\n", task.ID, task.Title)
+
 	// Ensure OpenCode permissions.
 	if err := opencode.EnsurePermissions(repoDir); err != nil {
 		return fmt.Errorf("ensuring permissions: %w", err)
@@ -99,6 +101,7 @@ func RunTask(
 	// Build task execution prompt.
 	var prompt string
 	if cfg.Spec.IsTaskBriefingEnabled() {
+		fmt.Fprintf(os.Stderr, "    ⏳ Generating task briefing...\n")
 		slog.Info("generating task briefing", "task", task.ID)
 		brief, briefErr := briefTask(ctx, client, cfg, repoDir, spec, task)
 		if briefErr != nil {
@@ -114,6 +117,7 @@ func RunTask(
 	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
 
 	// Send prompt and wait for completion.
+	fmt.Fprintf(os.Stderr, "    ⏳ Executing task (this may take several minutes)...\n")
 	_, err = client.SendPrompt(ctx, session.ID, prompt, primaryModel, repoDir)
 	if err != nil {
 		_ = UpdateTaskStatus(spec.TasksPath, task.ID, TaskStatusFailed)

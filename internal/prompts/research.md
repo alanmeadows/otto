@@ -95,9 +95,13 @@ No prior research exists. Build the document from scratch. Be thorough but focus
 
 ---
 
+## Output Rules
+
+**CRITICAL**: After completing all tool-based research (web searches, file reads), you MUST output the complete `research.md` document as your response text. Do NOT write it to a file using any tools — the calling system will handle saving. Do NOT output a summary of what you researched. Your entire response must be the full, complete document content below. No preamble, no commentary outside the document.
+
 ## Output Structure
 
-Produce `research.md` with this structure:
+Produce the complete `research.md` following this structure:
 
 ```markdown
 # Technical Research: [Brief Title]

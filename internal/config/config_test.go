@@ -11,14 +11,14 @@ import (
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Models.Primary != "anthropic/claude-sonnet-4-20250514" {
-		t.Errorf("expected primary model anthropic/claude-sonnet-4-20250514, got %s", cfg.Models.Primary)
+	if cfg.Models.Primary != "github-copilot/claude-opus-4.6" {
+		t.Errorf("expected primary model github-copilot/claude-opus-4.6, got %s", cfg.Models.Primary)
 	}
-	if cfg.Models.Secondary != "openai/o3" {
-		t.Errorf("expected secondary model openai/o3, got %s", cfg.Models.Secondary)
+	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
+		t.Errorf("expected secondary model github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
-	if cfg.Models.Tertiary != "google/gemini-2.5-pro" {
-		t.Errorf("expected tertiary model google/gemini-2.5-pro, got %s", cfg.Models.Tertiary)
+	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro" {
+		t.Errorf("expected tertiary model github-copilot/gemini-3-pro, got %s", cfg.Models.Tertiary)
 	}
 	if cfg.PR.MaxFixAttempts != 5 {
 		t.Errorf("expected max_fix_attempts 5, got %d", cfg.PR.MaxFixAttempts)
@@ -105,8 +105,8 @@ func TestMergeIntoConfig(t *testing.T) {
 		t.Errorf("expected primary=override-model, got %s", cfg.Models.Primary)
 	}
 	// Secondary should remain untouched
-	if cfg.Models.Secondary != "openai/o3" {
-		t.Errorf("expected secondary to remain openai/o3, got %s", cfg.Models.Secondary)
+	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
+		t.Errorf("expected secondary to remain github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
 }
 
@@ -178,11 +178,11 @@ func TestMergeDeepPreservesNestedFields(t *testing.T) {
 	if cfg.Models.Primary != "override-model" {
 		t.Errorf("expected primary=override-model, got %s", cfg.Models.Primary)
 	}
-	if cfg.Models.Secondary != "openai/o3" {
-		t.Errorf("expected secondary preserved as openai/o3, got %s", cfg.Models.Secondary)
+	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
+		t.Errorf("expected secondary preserved as github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
-	if cfg.Models.Tertiary != "google/gemini-2.5-pro" {
-		t.Errorf("expected tertiary preserved as google/gemini-2.5-pro, got %s", cfg.Models.Tertiary)
+	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro" {
+		t.Errorf("expected tertiary preserved as github-copilot/gemini-3-pro, got %s", cfg.Models.Tertiary)
 	}
 	if cfg.Server.Port != 4097 {
 		t.Errorf("expected server.port preserved as 4097, got %d", cfg.Server.Port)
@@ -248,7 +248,7 @@ func TestLoadMergesUserAndOverride(t *testing.T) {
 		t.Errorf("expected server.port=5555, got %d", cfg.Server.Port)
 	}
 	// Defaults preserved for fields neither user nor override set.
-	if cfg.Models.Secondary != "openai/o3" {
-		t.Errorf("expected models.secondary=openai/o3, got %s", cfg.Models.Secondary)
+	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
+		t.Errorf("expected models.secondary=github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
 }

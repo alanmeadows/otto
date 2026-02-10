@@ -33,6 +33,9 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 		return err
 	}
 
+	// Clean up stale lock files from previous crashes.
+	cleanupLockFile(spec.TasksPath)
+
 	// Parse tasks.
 	tasks, err := ParseTasks(spec.TasksPath)
 	if err != nil {
@@ -117,14 +120,23 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 			continue
 		}
 
-		// Phase review gate (task 4.2).
-		reviewPhase(ctx, client, cfg, repoDir, spec, phaseNum)
+		// Phase review gate (task 4.2) — with timeout.
+		fmt.Fprintf(os.Stderr, "  ⏳ Running phase %d review gate...\n", phaseNum)
+		reviewCtx, reviewCancel := context.WithTimeout(ctx, 10*time.Minute)
+		reviewPhase(reviewCtx, client, cfg, repoDir, spec, phaseNum)
+		reviewCancel()
 
-		// External assumption validation (task 4.6).
-		validateExternalAssumptions(ctx, client, cfg, repoDir, spec, phaseNum)
+		// External assumption validation (task 4.6) — with timeout.
+		fmt.Fprintf(os.Stderr, "  ⏳ Validating external assumptions...\n")
+		extCtx, extCancel := context.WithTimeout(ctx, 10*time.Minute)
+		validateExternalAssumptions(extCtx, client, cfg, repoDir, spec, phaseNum)
+		extCancel()
 
-		// Domain hardening (task 4.7).
-		hardenDomain(ctx, client, cfg, repoDir, spec, phaseNum)
+		// Domain hardening (task 4.7) — with timeout.
+		fmt.Fprintf(os.Stderr, "  ⏳ Running domain hardening...\n")
+		hardenCtx, hardenCancel := context.WithTimeout(ctx, 10*time.Minute)
+		hardenDomain(hardenCtx, client, cfg, repoDir, spec, phaseNum)
+		hardenCancel()
 
 		// Phase commit (task 4.1e).
 		committed := commitPhase(repoDir, phaseNum, phase)
@@ -134,11 +146,17 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 
 		// Summary chaining (task 4.5).
 		if committed {
-			generatePhaseSummary(ctx, client, cfg, repoDir, spec, phaseNum, phase)
+			fmt.Fprintf(os.Stderr, "  ⏳ Generating phase summary...\n")
+			sumCtx, sumCancel := context.WithTimeout(ctx, 5*time.Minute)
+			generatePhaseSummary(sumCtx, client, cfg, repoDir, spec, phaseNum, phase)
+			sumCancel()
 		}
 
 		// Question harvesting (task 4.3).
-		harvestQuestions(ctx, client, cfg, repoDir, spec, phaseNum, historyBaseline)
+		fmt.Fprintf(os.Stderr, "  ⏳ Harvesting questions...\n")
+		harvestCtx, harvestCancel := context.WithTimeout(ctx, 5*time.Minute)
+		harvestQuestions(harvestCtx, client, cfg, repoDir, spec, phaseNum, historyBaseline)
+		harvestCancel()
 
 		// Progress display (task 4.4).
 		printOverallProgress(phaseIdx+1, len(phases), tasks)
@@ -151,7 +169,10 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 
 	// Documentation alignment (task 4.8) — runs once after all phases complete.
 	if phasesExecuted > 0 {
-		alignDocumentation(ctx, client, cfg, repoDir, spec)
+		fmt.Fprintf(os.Stderr, "\n⏳ Running documentation alignment...\n")
+		docCtx, docCancel := context.WithTimeout(ctx, 15*time.Minute)
+		alignDocumentation(docCtx, client, cfg, repoDir, spec)
+		docCancel()
 	}
 
 	fmt.Fprintf(os.Stderr, "\n✓ Execution complete\n")
@@ -810,6 +831,20 @@ func printPhaseResults(phaseNum int, results []taskResult) {
 				msg += fmt.Sprintf(" (succeeded after %d retries)", r.Retries)
 			}
 			fmt.Fprintln(os.Stderr, successStyle.Render(msg))
+		}
+	}
+}
+
+// cleanupLockFile removes a stale .lock file if it exists.
+// flock locks are kernel-level and auto-released on process exit,
+// but the empty file remains on disk and can confuse users.
+func cleanupLockFile(tasksPath string) {
+	lockPath := tasksPath + ".lock"
+	if _, err := os.Stat(lockPath); err == nil {
+		if err := os.Remove(lockPath); err != nil {
+			slog.Debug("could not remove stale lock file", "path", lockPath, "error", err)
+		} else {
+			slog.Debug("cleaned up stale lock file", "path", lockPath)
 		}
 	}
 }

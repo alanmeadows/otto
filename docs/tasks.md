@@ -211,7 +211,7 @@ The foundation for all LLM interactions. Nothing that calls LLMs can work withou
   - `DeleteSession(ctx, client, sessionID, directory) -> error`: wraps `client.Session.Delete()`
   - `AbortSession(ctx, client, sessionID, directory) -> error`: wraps `client.Session.Abort()`
   - **Event streaming: use `Event.ListStreaming()` returning `*ssestream.Stream[EventListResponse]`, not `Event.List()` — SDK method names differ from what might be expected**
-  - Model ref type: `ModelRef { ProviderID, ModelID string }` parsed from config's `provider/model` format (e.g., `"anthropic/claude-sonnet-4-20250514"` → `ProviderID: "anthropic"`, `ModelID: "claude-sonnet-4-20250514"`)
+  - Model ref type: `ModelRef { ProviderID, ModelID string }` parsed from config's `provider/model` format (e.g., `"github-copilot/claude-opus-4.6"` → `ProviderID: "github-copilot"`, `ModelID: "claude-opus-4.6"`)
 
 ### 1.4 — Implement LLM JSON response parsing with retry
 - **status**: pending

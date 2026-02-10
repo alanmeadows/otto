@@ -129,9 +129,9 @@ type NotificationsConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Models: ModelsConfig{
-			Primary:   "anthropic/claude-sonnet-4-20250514",
-			Secondary: "openai/o3",
-			Tertiary:  "google/gemini-2.5-pro",
+			Primary:   "github-copilot/claude-opus-4.6",
+			Secondary: "github-copilot/gpt-5.2-codex",
+			Tertiary:  "github-copilot/gemini-3-pro",
 		},
 		OpenCode: OpenCodeConfig{
 			URL:         "http://localhost:4096",

@@ -47,9 +47,9 @@ Download from [GitHub Releases](https://github.com/alanmeadows/otto/releases). B
 
 ```bash
 # Set LLM models (defaults shown)
-otto config set models.primary "anthropic/claude-sonnet-4-20250514"
-otto config set models.secondary "openai/o3"
-otto config set models.tertiary "google/gemini-2.5-pro"
+otto config set models.primary "github-copilot/claude-opus-4.6"
+otto config set models.secondary "github-copilot/gpt-5.2-codex"
+otto config set models.tertiary "github-copilot/gemini-3-pro"
 
 # Configure a PR provider (GitHub example)
 otto config set pr.default_provider "github"
@@ -114,9 +114,9 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `models.primary` | string | `anthropic/claude-sonnet-4-20250514` | Primary LLM model |
-| `models.secondary` | string | `openai/o3` | Secondary model for multi-model review |
-| `models.tertiary` | string | `google/gemini-2.5-pro` | Tertiary model for multi-model review |
+| `models.primary` | string | `github-copilot/claude-opus-4.6` | Primary LLM model |
+| `models.secondary` | string | `github-copilot/gpt-5.2-codex` | Secondary model for multi-model review |
+| `models.tertiary` | string | `github-copilot/gemini-3-pro` | Tertiary model for multi-model review |
 | `opencode.url` | string | `http://localhost:4096` | OpenCode server URL |
 | `opencode.auto_start` | bool | `true` | Auto-start OpenCode server if not running |
 | `opencode.username` | string | `opencode` | OpenCode authentication username |

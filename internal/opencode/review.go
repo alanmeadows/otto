@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
+	"strings"
 
 	"github.com/alanmeadows/otto/internal/prompts"
 )
@@ -13,7 +15,6 @@ type ReviewPipeline struct {
 	client    LLMClient
 	primary   ModelRef
 	secondary ModelRef
-	tertiary  *ModelRef
 	directory string
 	maxCycles int
 }
@@ -22,7 +23,6 @@ type ReviewPipeline struct {
 type ReviewConfig struct {
 	Primary   ModelRef
 	Secondary ModelRef
-	Tertiary  *ModelRef
 	MaxCycles int // default 1, max 2
 }
 
@@ -39,21 +39,81 @@ func NewReviewPipeline(client LLMClient, directory string, cfg ReviewConfig) *Re
 		client:    client,
 		primary:   cfg.Primary,
 		secondary: cfg.Secondary,
-		tertiary:  cfg.Tertiary,
 		directory: directory,
 		maxCycles: maxCycles,
 	}
 }
 
-// Review runs the multi-model review pipeline and returns the final artifact.
-// The pipeline: primary generates → secondary critiques → (optional) tertiary critiques → primary refines.
+// ReviewStats captures metrics from the multi-model review pipeline.
+type ReviewStats struct {
+	// SecondaryCritiqueItems is the number of distinct findings raised by the secondary model.
+	SecondaryCritiqueItems int
+	// RefinementChangePct is the percentage of lines changed between the pre-review and post-review artifact,
+	// indicating how much feedback the primary model accepted and incorporated.
+	RefinementChangePct float64
+}
+
+// countCritiqueItems estimates the number of distinct findings in a critique.
+// It counts structural markers commonly used by LLMs to enumerate issues:
+// bullet points (- / * ), numbered items (1. ), and ### headings.
+func countCritiqueItems(critique string) int {
+	count := 0
+	for _, line := range strings.Split(critique, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		if strings.HasPrefix(trimmed, "### ") {
+			count++
+		} else if strings.HasPrefix(trimmed, "- ") || strings.HasPrefix(trimmed, "* ") {
+			count++
+		} else if len(trimmed) >= 3 && trimmed[0] >= '0' && trimmed[0] <= '9' && strings.Contains(trimmed[:3], ".") {
+			count++
+		}
+	}
+	return count
+}
+
+// lineDiffRatio computes the percentage of lines that differ between two texts.
+func lineDiffRatio(before, after string) float64 {
+	bLines := strings.Split(before, "\n")
+	aLines := strings.Split(after, "\n")
+
+	maxLen := len(bLines)
+	if len(aLines) > maxLen {
+		maxLen = len(aLines)
+	}
+	if maxLen == 0 {
+		return 0
+	}
+
+	// Count matching lines (simple LCS-like diff via line set comparison).
+	matched := 0
+	minLen := len(bLines)
+	if len(aLines) < minLen {
+		minLen = len(aLines)
+	}
+	for i := 0; i < minLen; i++ {
+		if bLines[i] == aLines[i] {
+			matched++
+		}
+	}
+
+	changed := maxLen - matched
+	pct := float64(changed) / float64(maxLen) * 100
+	return math.Round(pct*10) / 10 // one decimal place
+}
+
+// Review runs the multi-model review pipeline and returns the final artifact plus stats.
+// The pipeline: primary generates → secondary critiques → primary refines.
 //
 // Currently runs exactly maxCycles iterations. Future improvement: use Levenshtein distance
-// between pass 1 and pass 4 output — if delta exceeds 20% of artifact length, iterate.
+// between pass 1 and pass 3 output — if delta exceeds 20% of artifact length, iterate.
 // Alternatively, delegate to LLM: "Did the review feedback result in material changes? Reply YES/NO."
-func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData map[string]string) (string, error) {
+func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData map[string]string) (string, ReviewStats, error) {
 	var artifact string
 	var err error
+	var stats ReviewStats
 
 	for cycle := 0; cycle < p.maxCycles; cycle++ {
 		slog.Info("review pipeline", "cycle", cycle+1, "max_cycles", p.maxCycles)
@@ -71,38 +131,33 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 
 		artifact, err = p.generate(ctx, p.primary, currentPrompt)
 		if err != nil {
-			return "", fmt.Errorf("primary generation (cycle %d): %w", cycle+1, err)
+			return "", stats, fmt.Errorf("primary generation (cycle %d): %w", cycle+1, err)
 		}
 		slog.Debug("primary generated artifact", "length", len(artifact))
 
+		preReviewArtifact := artifact
+
 		// Pass 2: Secondary critiques
-		critique1, err := p.critique(ctx, p.secondary, artifact)
+		critique, err := p.critique(ctx, p.secondary, artifact)
 		if err != nil {
 			slog.Warn("secondary critique failed, continuing with primary output", "error", err)
 			continue
 		}
-		slog.Debug("secondary critique received", "length", len(critique1))
+		slog.Debug("secondary critique received", "length", len(critique))
+		stats.SecondaryCritiqueItems += countCritiqueItems(critique)
 
-		// Pass 3: (Optional) Tertiary critiques
-		var critique2 string
-		if p.tertiary != nil {
-			critique2, err = p.critique(ctx, *p.tertiary, artifact)
-			if err != nil {
-				slog.Warn("tertiary critique failed, continuing without", "error", err)
-			} else {
-				slog.Debug("tertiary critique received", "length", len(critique2))
-			}
-		}
-
-		// Pass 4: Primary incorporates feedback
-		artifact, err = p.refine(ctx, p.primary, artifact, critique1, critique2)
+		// Pass 3: Primary incorporates feedback
+		artifact, err = p.refine(ctx, p.primary, artifact, critique)
 		if err != nil {
-			return "", fmt.Errorf("primary refinement (cycle %d): %w", cycle+1, err)
+			return "", stats, fmt.Errorf("primary refinement (cycle %d): %w", cycle+1, err)
 		}
 		slog.Debug("primary refined artifact", "length", len(artifact))
+
+		// Measure how much the primary changed the artifact after receiving feedback.
+		stats.RefinementChangePct = lineDiffRatio(preReviewArtifact, artifact)
 	}
 
-	return artifact, nil
+	return artifact, stats, nil
 }
 
 // noToolsInstruction is appended to all review-pipeline prompts to prevent the
@@ -156,7 +211,7 @@ func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact 
 }
 
 // refine incorporates review feedback into the artifact.
-func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, critique1, critique2 string) (string, error) {
+func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, critique string) (string, error) {
 	session, err := p.client.CreateSession(ctx, "refine", p.directory)
 	if err != nil {
 		return "", err
@@ -169,13 +224,9 @@ func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, c
 
 %s
 
-## Review Feedback #1
+## Review Feedback
 
-%s`, artifact, critique1)
-
-	if critique2 != "" {
-		prompt += fmt.Sprintf("\n\n## Review Feedback #2\n\n%s", critique2)
-	}
+%s`, artifact, critique)
 
 	prompt += "\n\n## Instructions\n\nProduce the complete, final version of the artifact incorporating all valid feedback. Output ONLY the artifact content — no preamble, no commentary." + noToolsInstruction
 

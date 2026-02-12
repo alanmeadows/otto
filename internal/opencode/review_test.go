@@ -19,7 +19,7 @@ func TestReviewPipeline_FourPassFlow(t *testing.T) {
 		MaxCycles: 1,
 	})
 
-	result, err := pipeline.Review(context.Background(), "build something", nil)
+	result, _, err := pipeline.Review(context.Background(), "build something", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "generated artifact", result)
 
@@ -45,54 +45,52 @@ func TestReviewPipeline_SessionCleanup(t *testing.T) {
 		MaxCycles: 1,
 	})
 
-	_, err := pipeline.Review(context.Background(), "test", nil)
+	_, _, err := pipeline.Review(context.Background(), "test", nil)
 	require.NoError(t, err)
 
 	// All sessions should be deleted (3 created, 3 deleted)
 	assert.Empty(t, mock.Sessions, "all sessions should be cleaned up")
 }
 
-func TestReviewPipeline_WithTertiaryModel(t *testing.T) {
+func TestReviewPipeline_ThreePassFlow(t *testing.T) {
 	mock := NewMockLLMClient()
 	mock.DefaultResult = "artifact"
 
-	tertiary := ModelRef{ProviderID: "google", ModelID: "gemini"}
 	pipeline := NewReviewPipeline(mock, "/tmp/repo", ReviewConfig{
 		Primary:   ModelRef{ProviderID: "a", ModelID: "primary"},
 		Secondary: ModelRef{ProviderID: "b", ModelID: "secondary"},
-		Tertiary:  &tertiary,
 		MaxCycles: 1,
 	})
 
-	result, err := pipeline.Review(context.Background(), "test prompt", nil)
+	result, stats, err := pipeline.Review(context.Background(), "test", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "artifact", result)
 
-	// Should have 4 prompt calls: generate, secondary critique, tertiary critique, refine
+	// Should have 3 prompt calls: generate, critique, refine
 	history := mock.GetPromptHistory()
-	assert.Len(t, history, 4)
+	assert.Len(t, history, 3)
 	assert.Equal(t, "primary", history[0].Model.ModelID)
 	assert.Equal(t, "secondary", history[1].Model.ModelID)
-	assert.Equal(t, "gemini", history[2].Model.ModelID)
-	assert.Equal(t, "primary", history[3].Model.ModelID)
+	assert.Equal(t, "primary", history[2].Model.ModelID)
+
+	assert.GreaterOrEqual(t, stats.SecondaryCritiqueItems, 0)
 }
 
-func TestReviewPipeline_WithoutTertiary(t *testing.T) {
+func TestReviewPipeline_TwoModelFlow(t *testing.T) {
 	mock := NewMockLLMClient()
 	mock.DefaultResult = "artifact"
 
 	pipeline := NewReviewPipeline(mock, "/tmp/repo", ReviewConfig{
 		Primary:   ModelRef{ProviderID: "a", ModelID: "primary"},
 		Secondary: ModelRef{ProviderID: "b", ModelID: "secondary"},
-		Tertiary:  nil,
 		MaxCycles: 1,
 	})
 
-	result, err := pipeline.Review(context.Background(), "test", nil)
+	result, _, err := pipeline.Review(context.Background(), "test", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "artifact", result)
 
-	// Should have 3 prompt calls (no tertiary critique)
+	// Should have 3 prompt calls: generate, critique, refine
 	history := mock.GetPromptHistory()
 	assert.Len(t, history, 3)
 }
@@ -126,7 +124,7 @@ func TestReviewPipeline_CritiqueFails(t *testing.T) {
 
 	// The pipeline should complete with just the primary output
 	// when critique succeeds (default mock behavior), refine also runs
-	result, err := pipeline.Review(context.Background(), "test", nil)
+	result, _, err := pipeline.Review(context.Background(), "test", nil)
 	require.NoError(t, err)
 	assert.NotEmpty(t, result)
 }
@@ -143,7 +141,7 @@ func TestReviewPipeline_CritiqueError_StillCompletes(t *testing.T) {
 		MaxCycles: 1,
 	})
 
-	result, err := pipeline.Review(context.Background(), "build it", nil)
+	result, _, err := pipeline.Review(context.Background(), "build it", nil)
 	require.NoError(t, err)
 	// Should still return the primary-generated artifact since critique failure is non-fatal
 	assert.Equal(t, "primary artifact", result)
@@ -207,7 +205,7 @@ func TestReviewPipeline_TwoCycles(t *testing.T) {
 		MaxCycles: 2,
 	})
 
-	result, err := pipeline.Review(context.Background(), "test", nil)
+	result, _, err := pipeline.Review(context.Background(), "test", nil)
 	require.NoError(t, err)
 	assert.Equal(t, "artifact", result)
 
@@ -226,4 +224,68 @@ func TestModelRef_ParseAndString(t *testing.T) {
 	assert.Equal(t, "", ref2.ProviderID)
 	assert.Equal(t, "just-model", ref2.ModelID)
 	assert.Equal(t, "just-model", ref2.String())
+}
+
+func TestCountCritiqueItems(t *testing.T) {
+	tests := []struct {
+		name     string
+		critique string
+		expected int
+	}{
+		{"empty", "", 0},
+		{"bullets", "- item one\n- item two\n- item three", 3},
+		{"asterisks", "* item one\n* item two", 2},
+		{"numbered", "1. first\n2. second\n3. third", 3},
+		{"headings", "### Issue 1\nDetails\n### Issue 2\nDetails", 2},
+		{"mixed", "### Bug found\n- missing nil check\n- wrong type\n1. fix this\n2. fix that", 5},
+		{"prose_only", "This is just prose.\nNo structural markers here.\nJust paragraphs.", 0},
+		{"with_blank_lines", "- item one\n\n- item two\n\n### heading\n", 3},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.expected, countCritiqueItems(tc.critique))
+		})
+	}
+}
+
+func TestLineDiffRatio(t *testing.T) {
+	tests := []struct {
+		name   string
+		before string
+		after  string
+		minPct float64
+		maxPct float64
+	}{
+		{"identical", "line1\nline2\nline3", "line1\nline2\nline3", 0, 0},
+		{"empty_both", "", "", 0, 0},
+		{"all_different", "aaa\nbbb", "ccc\nddd", 90, 100},
+		{"partial_change", "line1\nline2\nline3\nline4", "line1\nchanged\nline3\nline4", 20, 30},
+		{"added_lines", "line1\nline2", "line1\nline2\nline3\nline4", 40, 60},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pct := lineDiffRatio(tc.before, tc.after)
+			assert.GreaterOrEqual(t, pct, tc.minPct, "change pct too low")
+			assert.LessOrEqual(t, pct, tc.maxPct, "change pct too high")
+		})
+	}
+}
+
+func TestReviewPipeline_StatsPopulated(t *testing.T) {
+	mock := NewMockLLMClient()
+	// The mock returns the same string for all calls, but critique counting
+	// will count structural items in the default result.
+	mock.DefaultResult = "- issue one\n- issue two\n### Big Problem\nDescription here"
+
+	pipeline := NewReviewPipeline(mock, "/tmp/repo", ReviewConfig{
+		Primary:   ModelRef{ModelID: "primary"},
+		Secondary: ModelRef{ModelID: "secondary"},
+		MaxCycles: 1,
+	})
+
+	_, stats, err := pipeline.Review(context.Background(), "test", nil)
+	require.NoError(t, err)
+
+	// The mock returns the same text for critiques, which has 3 structural items.
+	assert.Equal(t, 3, stats.SecondaryCritiqueItems)
 }

@@ -175,6 +175,30 @@ Uncertainties not resolvable from requirements and research:
 
 ---
 
+## Questions Separator
+
+After the complete design.md content, output the following separator and any questions you've identified during design. These are tracked separately from the design document.
+
+```
+===QUESTIONS===
+
+## Q<N>: <Short descriptive title>
+- **source**: design
+- **status**: unanswered
+- **question**: <The specific question>
+- **context**: <Why this matters — what implementation decision is blocked>
+```
+
+**Guidelines for design questions:**
+- Raise questions about requirements ambiguities that affect architecture decisions
+- Ask about performance/scale targets not specified in requirements but needed for design choices
+- Flag areas where multiple design approaches exist and the right choice depends on unstated preferences
+- Identify integration points where external system behavior is uncertain
+- If questions.md already has an answered question that resolves an ambiguity, incorporate the answer — don't re-ask
+- Zero questions is valid — only ask what genuinely blocks task generation
+
+---
+
 ## Context Documents
 
 ### requirements.md

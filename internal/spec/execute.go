@@ -23,7 +23,7 @@ import (
 // It processes tasks phase by phase, running tasks within each phase
 // concurrently (bounded by MaxParallelTasks), with per-task retry logic,
 // phase review gates, question harvesting, and git commits.
-func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config, repoDir, slug string) error {
+func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config, repoDir, slug string, force bool) error {
 	spec, err := ResolveSpec(slug, repoDir)
 	if err != nil {
 		return err
@@ -31,6 +31,17 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 
 	if err := CheckPrerequisites(spec, "execute"); err != nil {
 		return err
+	}
+
+	// Question gating: check for unanswered questions from prior phases.
+	if !force {
+		unanswered, err := CheckUnansweredQuestions(spec)
+		if err != nil {
+			return err
+		}
+		if unanswered > 0 {
+			return fmt.Errorf("%d unanswered question(s) — run 'otto spec questions' to resolve, or re-run with --force to skip", unanswered)
+		}
 	}
 
 	// Clean up stale lock files from previous crashes.
@@ -62,11 +73,6 @@ func Execute(ctx context.Context, client opencode.LLMClient, cfg *config.Config,
 	phases, err := BuildPhases(tasks)
 	if err != nil {
 		return fmt.Errorf("building phases: %w", err)
-	}
-
-	// Ensure OpenCode permissions for automated operation.
-	if err := opencode.EnsurePermissions(repoDir); err != nil {
-		return fmt.Errorf("ensuring permissions: %w", err)
 	}
 
 	maxParallel := cfg.Spec.MaxParallelTasks
@@ -371,8 +377,12 @@ func reviewPhase(
 
 	if strings.TrimSpace(diff) == "" {
 		slog.Debug("no changes to review", "phase", phaseNum)
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: no changes to review\n")
 		return
 	}
+
+	// Snapshot before review to detect changes made by the secondary model.
+	diffBefore := diff
 
 	phaseSummaries := readPhaseSummaries(spec)
 
@@ -404,6 +414,22 @@ func reviewPhase(
 	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
 		slog.Warn("failed to delete review session", "error", err)
 	}
+
+	// Report whether the secondary model made any fixes.
+	diffAfter, _ := gitDiff(repoDir)
+	if diffAfter != diffBefore {
+		// Count affected files from the delta.
+		changedFiles := countDiffFiles(diffAfter) - countDiffFiles(diffBefore)
+		if changedFiles < 0 {
+			changedFiles = -changedFiles
+		}
+		if changedFiles == 0 {
+			changedFiles = 1 // at least something changed
+		}
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: secondary model applied fixes (≈%d file(s) touched)\n", changedFiles)
+	} else {
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: no fixes needed\n")
+	}
 }
 
 // validateExternalAssumptions runs the External Assumption Validator & Repair agent.
@@ -421,6 +447,9 @@ func validateExternalAssumptions(
 	if ctx.Err() != nil {
 		return
 	}
+
+	// Snapshot before to detect changes.
+	diffBefore, _ := gitDiff(repoDir)
 
 	phaseSummaries := readPhaseSummaries(spec)
 
@@ -451,6 +480,14 @@ func validateExternalAssumptions(
 	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
 		slog.Warn("failed to delete external assumptions session", "error", err)
 	}
+
+	// Report whether the agent made any fixes.
+	diffAfter, _ := gitDiff(repoDir)
+	if diffAfter != diffBefore {
+		fmt.Fprintf(os.Stderr, "  ✓ External assumptions: fixes applied\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "  ✓ External assumptions: all valid\n")
+	}
 }
 
 // hardenDomain runs the Domain Hardening & Polishing agent.
@@ -468,6 +505,9 @@ func hardenDomain(
 	if ctx.Err() != nil {
 		return
 	}
+
+	// Snapshot before to detect changes.
+	diffBefore, _ := gitDiff(repoDir)
 
 	phaseSummaries := readPhaseSummaries(spec)
 
@@ -497,6 +537,14 @@ func hardenDomain(
 
 	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
 		slog.Warn("failed to delete domain hardening session", "error", err)
+	}
+
+	// Report whether the agent made any improvements.
+	diffAfter, _ := gitDiff(repoDir)
+	if diffAfter != diffBefore {
+		fmt.Fprintf(os.Stderr, "  ✓ Domain hardening: improvements applied\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "  ✓ Domain hardening: no changes needed\n")
 	}
 }
 
@@ -539,21 +587,19 @@ func alignDocumentation(
 		Secondary: secondaryModel,
 		MaxCycles: 1,
 	}
-	if cfg.Models.Tertiary != "" {
-		tertiaryModel := opencode.ParseModelRef(cfg.Models.Tertiary)
-		reviewCfg.Tertiary = &tertiaryModel
-	}
 
 	pipeline := opencode.NewReviewPipeline(client, repoDir, reviewCfg)
-	_, err = pipeline.Review(ctx, prompt, data)
+	_, stats, err := pipeline.Review(ctx, prompt, data)
 	if err != nil {
 		slog.Warn("documentation alignment review failed", "error", err)
 		return
 	}
 
+	printReviewStats("Documentation alignment", stats)
+
 	// Commit documentation changes separately if any were made.
 	if gitHasChanges(repoDir) {
-		if err := gitCommit(repoDir, "otto: documentation alignment"); err != nil {
+		if err := gitCommit(repoDir, "documentation alignment"); err != nil {
 			slog.Warn("failed to commit documentation alignment changes", "error", err)
 		} else {
 			slog.Info("committed documentation alignment changes")
@@ -581,7 +627,7 @@ func commitPhase(repoDir string, phaseNum int, phase []Task) bool {
 		summary = summary[:69] + "..."
 	}
 
-	message := fmt.Sprintf("otto: phase %d — %s", phaseNum, summary)
+	message := fmt.Sprintf("phase %d — %s", phaseNum, summary)
 
 	if err := gitCommit(repoDir, message); err != nil {
 		slog.Error("failed to commit phase", "phase", phaseNum, "error", err)
@@ -695,8 +741,22 @@ func harvestQuestions(
 	content := strings.TrimSpace(resp.Content)
 	if content == "" || strings.Contains(content, "No questions identified") {
 		slog.Debug("no questions harvested", "phase", phaseNum)
+		fmt.Fprintf(os.Stderr, "  ✓ Question harvest: no questions identified\n")
 		return
 	}
+
+	// Filter to only include structured question blocks (## Qn: headers and
+	// their content). The LLM may include preamble or analysis text that
+	// should not be written to questions.md.
+	content = filterToQuestionBlocks(content)
+	if content == "" {
+		slog.Debug("no structured questions found in harvest output", "phase", phaseNum)
+		fmt.Fprintf(os.Stderr, "  ✓ Question harvest: no structured questions found\n")
+		return
+	}
+
+	// Count harvested questions for the summary.
+	harvestedCount := strings.Count(content, "## Q")
 
 	existing := readArtifact(spec.QuestionsPath)
 	updated := existing
@@ -709,7 +769,31 @@ func harvestQuestions(
 		slog.Warn("failed to write harvested questions", "error", err)
 	} else {
 		slog.Info("harvested questions", "phase", phaseNum)
+		fmt.Fprintf(os.Stderr, "  ✓ Question harvest: %d question(s) surfaced\n", harvestedCount)
 	}
+}
+
+// filterToQuestionBlocks extracts only structured question sections (## Qn: ...)
+// from the LLM output, discarding preamble text or analysis commentary.
+func filterToQuestionBlocks(content string) string {
+	lines := strings.Split(content, "\n")
+	var result strings.Builder
+	inQuestion := false
+
+	for _, line := range lines {
+		if questionHeaderRe.MatchString(line) {
+			inQuestion = true
+		} else if strings.HasPrefix(line, "## ") || strings.HasPrefix(line, "# ") {
+			// A non-question heading ends the current question block.
+			inQuestion = false
+		}
+		if inQuestion {
+			result.WriteString(line)
+			result.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSpace(result.String())
 }
 
 // collectPhaseLogs reads history files created after the given baseline number.
@@ -878,4 +962,35 @@ func printOverallProgress(completedPhases, totalPhases int, tasks []Task) {
 		completedPhases, totalPhases, completed, total, pct, pending, failed,
 	)
 	fmt.Fprintf(os.Stderr, "\n%s\n", style.Render(progress))
+}
+
+// printReviewStats prints a styled summary of multi-model review pipeline results.
+func printReviewStats(phase string, stats opencode.ReviewStats) {
+	style := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+
+	var parts []string
+	if stats.SecondaryCritiqueItems > 0 {
+		parts = append(parts, fmt.Sprintf("secondary raised %d item(s)", stats.SecondaryCritiqueItems))
+	}
+
+	var msg string
+	if len(parts) > 0 {
+		detail := strings.Join(parts, ", ")
+		msg = fmt.Sprintf("  ✓ %s review: %s | primary changed %.1f%% of artifact", phase, detail, stats.RefinementChangePct)
+	} else {
+		msg = fmt.Sprintf("  ✓ %s review: no issues raised by reviewers", phase)
+	}
+
+	fmt.Fprintln(os.Stderr, style.Render(msg))
+}
+
+// countDiffFiles counts the number of file headers ("diff --git") in a unified diff string.
+func countDiffFiles(diff string) int {
+	count := 0
+	for _, line := range strings.Split(diff, "\n") {
+		if strings.HasPrefix(line, "diff --git ") {
+			count++
+		}
+	}
+	return count
 }

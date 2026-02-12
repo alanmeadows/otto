@@ -34,11 +34,15 @@ func init() {
 	specTaskCmd.AddCommand(specTaskRunCmd)
 
 	specTaskGenerateCmd.Flags().StringVar(&taskSpecSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
+	specTaskGenerateCmd.Flags().BoolVar(&taskForceFlag, "force", false, "Skip unanswered question gate")
 	specTaskListCmd.Flags().StringVar(&taskSpecSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specTaskAddCmd.Flags().StringVar(&taskSpecSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specTaskRunCmd.Flags().StringVar(&taskSpecSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specTaskRunCmd.Flags().StringVar(&taskIDFlag, "id", "", "Task ID to run (inferred if only one runnable)")
 }
+
+// taskForceFlag is for the generate subcommand.
+var taskForceFlag bool
 
 var specTaskGenerateCmd = &cobra.Command{
 	Use:   "generate",
@@ -63,7 +67,7 @@ a specific spec when multiple exist.`,
 		}
 
 		slug, _ := cmd.Flags().GetString("spec")
-		if err := spec.SpecTaskGenerate(cmd.Context(), client, appConfig, repoDir, slug); err != nil {
+		if err := spec.SpecTaskGenerate(cmd.Context(), client, appConfig, repoDir, slug, taskForceFlag); err != nil {
 			return err
 		}
 

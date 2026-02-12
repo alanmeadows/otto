@@ -17,9 +17,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
 		t.Errorf("expected secondary model github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
 	}
-	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro-preview" {
-		t.Errorf("expected tertiary model github-copilot/gemini-3-pro-preview, got %s", cfg.Models.Tertiary)
-	}
 	if cfg.PR.MaxFixAttempts != 5 {
 		t.Errorf("expected max_fix_attempts 5, got %d", cfg.PR.MaxFixAttempts)
 	}
@@ -29,8 +26,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Spec.MaxParallelTasks != 4 {
 		t.Errorf("expected max_parallel_tasks 4, got %d", cfg.Spec.MaxParallelTasks)
 	}
-	if cfg.Server.ParsePollInterval() != 2*time.Minute {
-		t.Errorf("expected poll interval 2m, got %v", cfg.Server.ParsePollInterval())
+	if cfg.Server.ParsePollInterval() != 10*time.Minute {
+		t.Errorf("expected poll interval 10m, got %v", cfg.Server.ParsePollInterval())
 	}
 	if cfg.Spec.ParseTaskTimeout() != 30*time.Minute {
 		t.Errorf("expected task timeout 30m, got %v", cfg.Spec.ParseTaskTimeout())
@@ -136,8 +133,8 @@ func TestApplyEnvOverrides(t *testing.T) {
 
 func TestServerConfigParsePollInterval_Invalid(t *testing.T) {
 	s := ServerConfig{PollInterval: "not-a-duration"}
-	if s.ParsePollInterval() != 2*time.Minute {
-		t.Error("expected fallback to 2m for invalid duration")
+	if s.ParsePollInterval() != 10*time.Minute {
+		t.Error("expected fallback to 10m for invalid duration")
 	}
 }
 
@@ -180,9 +177,6 @@ func TestMergeDeepPreservesNestedFields(t *testing.T) {
 	}
 	if cfg.Models.Secondary != "github-copilot/gpt-5.2-codex" {
 		t.Errorf("expected secondary preserved as github-copilot/gpt-5.2-codex, got %s", cfg.Models.Secondary)
-	}
-	if cfg.Models.Tertiary != "github-copilot/gemini-3-pro-preview" {
-		t.Errorf("expected tertiary preserved as github-copilot/gemini-3-pro-preview, got %s", cfg.Models.Tertiary)
 	}
 	if cfg.Server.Port != 4097 {
 		t.Errorf("expected server.port preserved as 4097, got %d", cfg.Server.Port)

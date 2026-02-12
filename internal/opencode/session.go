@@ -156,7 +156,10 @@ func (s *SDKLLMClient) SendPrompt(ctx context.Context, sessionID string, prompt 
 
 	slog.Debug("prompt sent, racing Prompt() vs SSE session.idle", "session", sessionID)
 
-	// Step 4: Periodic activity logging
+	// Step 4: Periodic activity logging + inactivity timeout.
+	// If no SSE events arrive for 5 minutes, the stream likely died silently;
+	// abort to prevent blocking the daemon indefinitely.
+	const inactivityTimeout = 5 * time.Minute
 	activityTicker := time.NewTicker(30 * time.Second)
 	defer activityTicker.Stop()
 
@@ -202,7 +205,15 @@ func (s *SDKLLMClient) SendPrompt(ctx context.Context, sessionID string, prompt 
 
 		case <-activityTicker.C:
 			la := lastActivity.Load()
-			slog.Debug("still waiting for session completion", "session", sessionID, "last_activity_ago", time.Since(la).Round(time.Second))
+			inactiveDur := time.Since(la)
+			slog.Debug("still waiting for session completion", "session", sessionID, "last_activity_ago", inactiveDur.Round(time.Second))
+			if inactiveDur >= inactivityTimeout {
+				slog.Error("SSE inactivity timeout — aborting stuck session", "session", sessionID, "inactive_for", inactiveDur.Round(time.Second))
+				cancel()
+				// Best-effort abort so OpenCode also stops working on it.
+				_ = s.AbortSession(context.Background(), sessionID, directory)
+				return nil, fmt.Errorf("session %s timed out after %s of SSE inactivity", sessionID, inactiveDur.Round(time.Second))
+			}
 		}
 	}
 }

@@ -45,6 +45,16 @@ type PRBackend interface {
 
 	// RunWorkflow executes a workflow action on the pull request (e.g., auto-complete, create work item).
 	RunWorkflow(ctx context.Context, pr *PRInfo, action WorkflowAction) error
+
+	// CreatePR creates a new pull request and returns its metadata.
+	CreatePR(ctx context.Context, params CreatePRParams) (*PRInfo, error)
+
+	// FindExistingPR searches for an existing PR from the given source branch.
+	// Returns nil, nil if no matching PR is found.
+	FindExistingPR(ctx context.Context, sourceBranch string) (*PRInfo, error)
+
+	// RetryBuild retries a failed build by its ID.
+	RetryBuild(ctx context.Context, pr *PRInfo, buildID string) error
 }
 
 // PRInfo contains metadata about a pull request.
@@ -57,6 +67,8 @@ type PRInfo struct {
 	Description string
 	// Status is the current PR status (e.g., "active", "completed", "abandoned").
 	Status string
+	// MergeStatus indicates mergeability (e.g., "succeeded", "conflicts", "queued").
+	MergeStatus string
 	// SourceBranch is the branch being merged from.
 	SourceBranch string
 	// TargetBranch is the branch being merged into.
@@ -71,6 +83,18 @@ type PRInfo struct {
 	Project string
 	// Organization is the organization name (used by ADO for API routing).
 	Organization string
+}
+
+// CreatePRParams contains the parameters needed to create a new pull request.
+type CreatePRParams struct {
+	// Title is the pull request title.
+	Title string
+	// Description is the pull request description/body text.
+	Description string
+	// SourceBranch is the branch being merged from (e.g., "users/alanmeadows/my-feature").
+	SourceBranch string
+	// TargetBranch is the branch being merged into (e.g., "main").
+	TargetBranch string
 }
 
 // PipelineStatus represents the CI/CD pipeline status for a pull request.
@@ -105,6 +129,8 @@ type Comment struct {
 	Author string
 	// Body is the comment text content.
 	Body string
+	// CommentType indicates the type of comment ("text" for user comments, "system" for auto-generated).
+	CommentType string
 	// IsResolved indicates whether the comment thread has been resolved.
 	IsResolved bool
 	// FilePath is the file path for inline comments (empty for general comments).

@@ -98,6 +98,9 @@ func handleAddPR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trigger immediate poll so the new PR is picked up right away.
+	TriggerPoll()
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(pr)
@@ -148,4 +151,10 @@ func handleFixPR(w http.ResponseWriter, r *http.Request) {
 
 	// TODO: Queue the fix for async execution by the monitoring loop (Phase 8.3).
 	slog.Info("fix requested via API", "prID", pr.ID)
+}
+
+func handlePoll(w http.ResponseWriter, r *http.Request) {
+	TriggerPoll()
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "triggered"})
 }

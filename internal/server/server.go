@@ -12,6 +12,20 @@ import (
 	"github.com/alanmeadows/otto/internal/opencode"
 )
 
+// pollTrigger is a channel that signals the monitor loop to run an immediate
+// poll cycle. Used by the API server when PRs are added/modified.
+var pollTrigger = make(chan struct{}, 1)
+
+// TriggerPoll sends a non-blocking signal to the monitor loop to poll immediately.
+func TriggerPoll() {
+	select {
+	case pollTrigger <- struct{}{}:
+		slog.Debug("poll trigger sent")
+	default:
+		// Already triggered, don't block.
+	}
+}
+
 // RunServer starts the HTTP server and blocks until the context is cancelled.
 func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 	serverStartTime = time.Now()
@@ -82,4 +96,5 @@ func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /prs", handleAddPR)
 	mux.HandleFunc("DELETE /prs/{id}", handleDeletePR)
 	mux.HandleFunc("POST /prs/{id}/fix", handleFixPR)
+	mux.HandleFunc("POST /poll", handlePoll)
 }

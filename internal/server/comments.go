@@ -37,11 +37,6 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		defer cleanup()
 	}
 
-	// Ensure OpenCode permissions.
-	if err := opencode.EnsurePermissions(workDir); err != nil {
-		return fmt.Errorf("ensuring permissions: %w", err)
-	}
-
 	llm := serverMgr.LLM()
 	if llm == nil {
 		return fmt.Errorf("OpenCode server not available")
@@ -113,7 +108,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 	case "AGREE":
 		// The LLM should have made code changes in the session.
 		// Commit and push if there are changes.
-		commitHash, err := gitCommitAndPush(ctx, workDir, fmt.Sprintf("otto: address review comment on %s:%d", comment.FilePath, comment.Line))
+		commitHash, err := gitCommitAndPush(ctx, workDir, pr.Branch, fmt.Sprintf("address review comment on %s:%d", comment.FilePath, comment.Line))
 		if err != nil {
 			slog.Warn("no changes to commit for AGREE decision", "error", err)
 		} else {
@@ -146,8 +141,8 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		time.Now().UTC().Format(time.RFC3339),
 		commentResp.Decision, commentResp.Reply)
 
-	// Track the comment as seen.
-	pr.SeenCommentIDs = append(pr.SeenCommentIDs, comment.ID)
+	// Track the comment as seen using composite key (threadID:commentID).
+	pr.SeenCommentIDs = append(pr.SeenCommentIDs, fmt.Sprintf("%s:%s", comment.ThreadID, comment.ID))
 
 	// Persist updated PR document.
 	if err := SavePR(pr); err != nil {

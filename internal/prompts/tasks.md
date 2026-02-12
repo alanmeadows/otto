@@ -34,6 +34,16 @@ Summaries from previously completed execution phases. Use these to understand wh
 {{.phase_summaries}}
 {{end}}
 
+{{if .questions_md}}
+### Questions & Answers
+
+Previously identified questions and their resolution status. Incorporate answered questions into task descriptions where relevant. If a task depends on an unanswered question, note this in the task description.
+
+```markdown
+{{.questions_md}}
+```
+{{end}}
+
 ---
 
 ## Task Sizing
@@ -105,6 +115,8 @@ Tasks are organized into parallel groups. All tasks in the same `parallel_group`
 
 Produce markdown with this exact structure. No YAML frontmatter. No preamble or commentary.
 
+**CRITICAL**: Output ONLY the structured task list using the `## Task N:` format below. Do NOT output the content of files that tasks will create or modify — task descriptions should instruct the implementing LLM *what* to create, not contain the file content itself. For example, if the spec asks to create a CONTRIBUTING.md, the task description should say "Create a CONTRIBUTING.md file with sections for..." — NOT the actual markdown of the CONTRIBUTING.md file.
+
 ```
 # Tasks
 
@@ -153,3 +165,26 @@ Before output, verify:
 - [ ] Task IDs are sequential and consistent
 - [ ] No dependency cycles
 - [ ] Integration tests are in a final group
+
+---
+
+## Questions Separator
+
+After the complete tasks.md content, output the following separator and any questions you've identified during task generation. These are tracked separately from the tasks document.
+
+```
+===QUESTIONS===
+
+## Q<N>: <Short descriptive title>
+- **source**: task-generate
+- **status**: unanswered
+- **question**: <The specific question>
+- **context**: <Why this matters — what task definition is affected>
+```
+
+**Guidelines for task-generation questions:**
+- Raise questions about design gaps that make a task description imprecise or ambiguous
+- Ask about unclear dependency ordering or file ownership conflicts
+- Flag tasks whose scope is uncertain due to missing requirements detail
+- Identify areas where the design's file manifest doesn't match what tasks actually need
+- Zero questions is valid — only ask what genuinely blocks task execution

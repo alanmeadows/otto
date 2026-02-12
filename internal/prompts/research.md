@@ -60,6 +60,16 @@ The repository already contains code. This summary describes its structure, fram
 {{.existing_research_md}}
 {{end}}
 
+{{if .questions_md}}
+### Questions & Answers
+
+Previously identified questions from upstream phases and their resolution status. Use answered questions to guide research focus. If a question is unanswered and relevant to your research, investigate it.
+
+```markdown
+{{.questions_md}}
+```
+{{end}}
+
 ---
 
 ## Instructions
@@ -97,7 +107,7 @@ No prior research exists. Build the document from scratch. Be thorough but focus
 
 ## Output Rules
 
-**CRITICAL**: After completing all tool-based research (web searches, file reads), you MUST output the complete `research.md` document as your response text. Do NOT write it to a file using any tools — the calling system will handle saving. Do NOT output a summary of what you researched. Your entire response must be the full, complete document content below. No preamble, no commentary outside the document.
+**CRITICAL**: After completing all tool-based research (web searches, file reads), you MUST output the complete `research.md` document as your response text. Do NOT write it to a file using any tools — the calling system will handle saving. Do NOT output a summary of what you researched. Your entire response must be the full, complete document content below, followed by a `===QUESTIONS===` separator and any questions (see end of this prompt). No preamble, no commentary outside the document.
 
 ## Output Structure
 
@@ -244,3 +254,26 @@ Before finalizing, verify:
 - [ ] Research is tailored to the project archetype (not generic REST-centric advice)
 - [ ] Every [UNVERIFIED] tag explains what you searched for
 - [ ] References are real URLs you actually visited
+
+---
+
+## Questions Separator
+
+After the complete research.md content, output the following separator and any questions you've identified during research. These are tracked separately from the research document.
+
+```
+===QUESTIONS===
+
+## Q<N>: <Short descriptive title>
+- **source**: research
+- **status**: unanswered
+- **question**: <The specific question>
+- **context**: <Why this matters — what design decision is blocked>
+```
+
+**Guidelines for research questions:**
+- Raise questions about ambiguities in requirements that you discovered during research
+- Ask about technology choices where multiple viable options exist and the requirements don't specify
+- Flag external dependency risks that need stakeholder input
+- Identify gaps where requirements and codebase conventions conflict
+- Zero questions is valid — only ask what genuinely blocks the design phase

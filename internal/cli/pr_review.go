@@ -74,12 +74,7 @@ automatically.`,
 			slog.Warn("codebase analysis failed, continuing without summary", "error", err)
 		}
 
-		// Step 4: Ensure OpenCode permissions.
-		if err := opencode.EnsurePermissions(workDir); err != nil {
-			return fmt.Errorf("ensuring permissions: %w", err)
-		}
-
-		// Step 5: Create OpenCode session.
+		// Step 4: Create OpenCode session.
 		mgr := opencode.NewServerManager(opencode.ServerManagerConfig{
 			BaseURL:   appConfig.OpenCode.URL,
 			AutoStart: appConfig.OpenCode.AutoStart,

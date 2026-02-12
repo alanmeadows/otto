@@ -29,6 +29,7 @@ func init() {
 	serverCmd.AddCommand(serverStopCmd)
 	serverCmd.AddCommand(serverStatusCmd)
 	serverCmd.AddCommand(serverInstallCmd)
+	serverCmd.AddCommand(serverLogsCmd)
 
 	serverStartCmd.Flags().BoolVar(&foregroundFlag, "foreground", false, "Run in foreground (don't daemonize)")
 	serverStartCmd.Flags().IntVar(&portFlag, "port", 0, "Server port (default from config or 4097)")
@@ -95,6 +96,21 @@ that it is not running.`,
 		} else {
 			fmt.Fprintln(cmd.OutOrStdout(), "daemon is not running")
 		}
+		return nil
+	},
+}
+
+var serverLogsCmd = &cobra.Command{
+	Use:     "logs",
+	Short:   "Show the daemon log file path",
+	Long:    `Print the path to the otto daemon log file.`,
+	Example: `  otto server logs`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		path := server.LogFilePath()
+		if path == "" {
+			return fmt.Errorf("cannot determine log file path")
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), path)
 		return nil
 	},
 }

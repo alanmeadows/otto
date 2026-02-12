@@ -18,6 +18,11 @@ import (
 	"github.com/alanmeadows/otto/internal/provider"
 )
 
+// ErrAuthExpired indicates that the ADO token has expired and could not
+// be refreshed.  Callers can check for this with errors.Is to short-circuit
+// an entire poll cycle instead of hammering ADO with doomed requests.
+var ErrAuthExpired = fmt.Errorf("ADO authentication expired — run 'az login' to refresh")
+
 // ansiPattern matches ANSI escape codes for stripping from build logs.
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
@@ -37,7 +42,7 @@ func NewBackend(organization, project string, auth *AuthProvider) *Backend {
 		auth:         auth,
 		organization: organization,
 		project:      project,
-		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		httpClient:   &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
@@ -112,6 +117,7 @@ func (b *Backend) GetPR(ctx context.Context, id string) (*provider.PRInfo, error
 		Title:        adoPR.Title,
 		Description:  adoPR.Description,
 		Status:       adoPR.Status,
+		MergeStatus:  adoPR.MergeStatus,
 		SourceBranch: adoPR.SourceRefName,
 		TargetBranch: adoPR.TargetRefName,
 		Author:       adoPR.CreatedBy.DisplayName,
@@ -146,12 +152,28 @@ func (b *Backend) GetPipelineStatus(ctx context.Context, pr *provider.PRInfo) (*
 		return nil, fmt.Errorf("failed to decode builds response: %w", err)
 	}
 
-	status := &provider.PipelineStatus{
-		State:  "succeeded",
-		Builds: make([]provider.BuildInfo, 0, len(buildList.Value)),
+	// Deduplicate builds: keep only the latest (first seen) per pipeline definition.
+	// The ADO API returns builds sorted by ID descending (newest first).
+	seen := make(map[string]bool)
+	var latestBuilds []adoBuild
+	for _, build := range buildList.Value {
+		defName := build.Definition.Name
+		if seen[defName] {
+			continue
+		}
+		seen[defName] = true
+		latestBuilds = append(latestBuilds, build)
 	}
 
-	for _, build := range buildList.Value {
+	status := &provider.PipelineStatus{
+		State:  "unknown",
+		Builds: make([]provider.BuildInfo, 0, len(latestBuilds)),
+	}
+
+	hasCompleted := false
+	allSucceeded := true
+
+	for _, build := range latestBuilds {
 		bi := provider.BuildInfo{
 			ID:     strconv.Itoa(build.ID),
 			Name:   build.Definition.Name,
@@ -161,18 +183,36 @@ func (b *Backend) GetPipelineStatus(ctx context.Context, pr *provider.PRInfo) (*
 		}
 		status.Builds = append(status.Builds, bi)
 
-		// Determine overall state.
+		// Determine overall state from only the latest build per definition.
 		switch {
 		case build.Result == "failed" || build.Result == "partiallySucceeded" || build.Result == "canceled":
 			status.State = "failed"
-		case build.Status == "inProgress" && status.State != "failed":
-			status.State = "inProgress"
-		case build.Status == "notStarted" && status.State != "failed" && status.State != "inProgress":
-			status.State = "pending"
+			allSucceeded = false
+		case build.Result == "succeeded":
+			hasCompleted = true
+			// Leave state as-is; only set "succeeded" after checking all builds.
+		case build.Status == "inProgress" || build.Result == "":
+			// Build is still running — not yet decided.
+			if status.State != "failed" {
+				status.State = "inProgress"
+			}
+			allSucceeded = false
+		case build.Status == "notStarted":
+			if status.State != "failed" && status.State != "inProgress" {
+				status.State = "pending"
+			}
+			allSucceeded = false
+		default:
+			allSucceeded = false
 		}
 	}
 
-	if len(buildList.Value) == 0 {
+	// Only report "succeeded" when every build has explicitly passed.
+	if len(latestBuilds) > 0 && allSucceeded && hasCompleted {
+		status.State = "succeeded"
+	}
+
+	if len(latestBuilds) == 0 {
 		status.State = "pending"
 	}
 
@@ -206,7 +246,8 @@ func (b *Backend) GetComments(ctx context.Context, pr *provider.PRInfo) ([]provi
 	var comments []provider.Comment
 	for _, thread := range threadList.Value {
 		// ADO thread status: 1=active, 2=fixed, 3=wontFix, 4=closed, 5=byDesign
-		isResolved := thread.Status >= 2
+		// Status can be returned as int or string depending on API version.
+		isResolved := isThreadResolved(thread.Status)
 
 		var filePath string
 		var line int
@@ -218,24 +259,38 @@ func (b *Backend) GetComments(ctx context.Context, pr *provider.PRInfo) ([]provi
 		}
 
 		for _, c := range thread.Comments {
-			// Skip system-generated comments.
-			if c.CommentType == "system" {
-				continue
-			}
 			comments = append(comments, provider.Comment{
-				ID:         strconv.Itoa(c.ID),
-				ThreadID:   strconv.Itoa(thread.ID),
-				Author:     c.Author.DisplayName,
-				Body:       c.Content,
-				IsResolved: isResolved,
-				FilePath:   filePath,
-				Line:       line,
-				CreatedAt:  c.PublishedDate,
+				ID:          strconv.Itoa(c.ID),
+				ThreadID:    strconv.Itoa(thread.ID),
+				Author:      c.Author.DisplayName,
+				Body:        c.Content,
+				CommentType: c.CommentType,
+				IsResolved:  isResolved,
+				FilePath:    filePath,
+				Line:        line,
+				CreatedAt:   c.PublishedDate,
 			})
 		}
 	}
 
 	return comments, nil
+}
+
+// isThreadResolved determines if a thread is resolved from its status value.
+// ADO API may return status as an int (1=active, 2=fixed, 3=wontFix, 4=closed, 5=byDesign)
+// or as a string ("active", "fixed", "wontFix", "closed", "byDesign").
+func isThreadResolved(status any) bool {
+	switch v := status.(type) {
+	case float64:
+		return int(v) >= 2
+	case int:
+		return v >= 2
+	case string:
+		s := strings.ToLower(v)
+		return s == "fixed" || s == "wontfix" || s == "closed" || s == "bydesign"
+	default:
+		return false
+	}
 }
 
 // PostComment posts a general comment on a pull request.
@@ -264,6 +319,85 @@ func (b *Backend) PostComment(ctx context.Context, pr *provider.PRInfo, body str
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return b.parseError(resp)
+	}
+
+	return nil
+}
+
+// PostCommentThread posts a comment thread on a pull request and returns the thread ID.
+func (b *Backend) PostCommentThread(ctx context.Context, pr *provider.PRInfo, body string) (string, error) {
+	org := b.resolveOrg(pr)
+	project := b.resolveProject(pr)
+	repo := b.resolveRepo(pr)
+
+	path := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s/pullrequests/%s/threads",
+		url.PathEscape(org), url.PathEscape(project), url.PathEscape(repo), pr.ID)
+
+	thread := map[string]any{
+		"comments": []map[string]any{
+			{
+				"content":     body,
+				"commentType": "text",
+			},
+		},
+		"status": 1, // active
+	}
+
+	resp, err := b.doRequest(ctx, http.MethodPost, path, thread)
+	if err != nil {
+		return "", fmt.Errorf("failed to post comment thread: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return "", b.parseError(resp)
+	}
+
+	var result struct {
+		ID int `json:"id"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return "", fmt.Errorf("failed to decode thread response: %w", err)
+	}
+
+	return fmt.Sprintf("%d", result.ID), nil
+}
+
+// UpdateThreadStatus updates the status of a comment thread on a pull request.
+func (b *Backend) UpdateThreadStatus(ctx context.Context, pr *provider.PRInfo, threadID string, status string) error {
+	org := b.resolveOrg(pr)
+	project := b.resolveProject(pr)
+	repo := b.resolveRepo(pr)
+
+	path := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s/pullrequests/%s/threads/%s",
+		url.PathEscape(org), url.PathEscape(project), url.PathEscape(repo), pr.ID, threadID)
+
+	// Map status string to ADO integer.
+	statusMap := map[string]int{
+		"active":   1,
+		"fixed":    2,
+		"wontfix":  3,
+		"closed":   4,
+		"bydesign": 5,
+		"pending":  6,
+	}
+	statusInt, ok := statusMap[strings.ToLower(status)]
+	if !ok {
+		return fmt.Errorf("unknown thread status: %s", status)
+	}
+
+	update := map[string]any{
+		"status": statusInt,
+	}
+
+	resp, err := b.doRequest(ctx, http.MethodPatch, path, update)
+	if err != nil {
+		return fmt.Errorf("failed to update thread status: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
 		return b.parseError(resp)
 	}
 
@@ -552,7 +686,7 @@ func (b *Backend) doRequestFull(ctx context.Context, method, path string, body a
 	if strings.Contains(path, "?") {
 		separator = "&"
 	}
-	fullURL := baseURL + path + separator + "api-version=7.1"
+	fullURL := baseURL + path + separator + "api-version=7.1-preview"
 
 	const maxRetries = 3
 	for attempt := 0; attempt <= maxRetries; attempt++ {
@@ -587,6 +721,18 @@ func (b *Backend) doRequestFull(ctx context.Context, method, path string, body a
 		}
 
 		if resp.StatusCode != http.StatusTooManyRequests {
+			// HTTP 203: ADO returns the sign-in HTML page when the token
+			// is expired or invalid. Invalidate the cached token and retry once.
+			if resp.StatusCode == 203 {
+				resp.Body.Close()
+				if attempt == 0 {
+					b.auth.InvalidateToken()
+					slog.Warn("ADO returned 203 (auth redirect), refreshing token and retrying", "url", fullURL)
+					continue
+				}
+				// Retry also got 203 — az session is likely expired.
+				return nil, ErrAuthExpired
+			}
 			return resp, nil
 		}
 
@@ -668,7 +814,12 @@ func (b *Backend) parseError(resp *http.Response) error {
 
 	var adoErr adoError
 	if err := json.Unmarshal(body, &adoErr); err != nil {
-		return fmt.Errorf("ADO API error (status %d): %s", resp.StatusCode, string(body))
+		// Non-JSON response (e.g. HTML error pages). Truncate to avoid log spam.
+		truncated := string(body)
+		if len(truncated) > 200 {
+			truncated = truncated[:200] + "... (truncated)"
+		}
+		return fmt.Errorf("ADO API error (status %d): %s", resp.StatusCode, truncated)
 	}
 
 	return fmt.Errorf("ADO API error (status %d, %s): %s", resp.StatusCode, adoErr.TypeKey, adoErr.Message)
@@ -700,3 +851,145 @@ func (b *Backend) resolveRepo(pr *provider.PRInfo) string {
 
 // Verify Backend implements PRBackend at compile time.
 var _ provider.PRBackend = (*Backend)(nil)
+
+// RetryBuild retries a failed build by its ID using the ADO REST API.
+func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
+	org := b.resolveOrg(pr)
+	project := b.resolveProject(pr)
+
+	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true&api-version=7.1-preview",
+		url.PathEscape(org), url.PathEscape(project), buildID)
+
+	resp, err := b.doRequest(ctx, http.MethodPatch, path, map[string]any{"retry": true})
+	if err != nil {
+		return fmt.Errorf("failed to retry build %s: %w", buildID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return fmt.Errorf("retry build %s returned status %d: %w", buildID, resp.StatusCode, b.parseError(resp))
+	}
+
+	slog.Info("build retry queued", "buildID", buildID, "prID", pr.ID)
+	return nil
+}
+
+// CreatePR creates a new pull request in ADO.
+func (b *Backend) CreatePR(ctx context.Context, params provider.CreatePRParams) (*provider.PRInfo, error) {
+	repo := b.repository
+	if repo == "" {
+		return nil, fmt.Errorf("repository not set on backend")
+	}
+
+	// Ensure branch refs have the refs/heads/ prefix.
+	src := ensureRefPrefix(params.SourceBranch)
+	tgt := ensureRefPrefix(params.TargetBranch)
+
+	path := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s/pullrequests",
+		url.PathEscape(b.organization), url.PathEscape(b.project), url.PathEscape(repo))
+
+	body := adoPullRequestCreate{
+		SourceRefName: src,
+		TargetRefName: tgt,
+		Title:         params.Title,
+		Description:   params.Description,
+	}
+
+	resp, err := b.doRequest(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create PR: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, b.parseError(resp)
+	}
+
+	var adoPR adoPullRequest
+	if err := json.NewDecoder(resp.Body).Decode(&adoPR); err != nil {
+		return nil, fmt.Errorf("failed to decode create PR response: %w", err)
+	}
+
+	webURL := adoPR.Links.Web.Href
+	if webURL == "" {
+		webURL = fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s/pullrequest/%d",
+			b.organization, b.project, adoPR.Repository.Name, adoPR.PullRequestID)
+	}
+
+	return &provider.PRInfo{
+		ID:           strconv.Itoa(adoPR.PullRequestID),
+		Title:        adoPR.Title,
+		Description:  adoPR.Description,
+		Status:       adoPR.Status,
+		SourceBranch: adoPR.SourceRefName,
+		TargetBranch: adoPR.TargetRefName,
+		Author:       adoPR.CreatedBy.DisplayName,
+		URL:          webURL,
+		RepoID:       adoPR.Repository.Name,
+		Project:      b.project,
+		Organization: b.organization,
+	}, nil
+}
+
+// FindExistingPR searches for an active PR from the given source branch.
+// Returns nil, nil if no matching PR is found.
+func (b *Backend) FindExistingPR(ctx context.Context, sourceBranch string) (*provider.PRInfo, error) {
+	repo := b.repository
+	if repo == "" {
+		return nil, fmt.Errorf("repository not set on backend")
+	}
+
+	src := ensureRefPrefix(sourceBranch)
+
+	path := fmt.Sprintf("/%s/%s/_apis/git/repositories/%s/pullrequests?searchCriteria.sourceRefName=%s&searchCriteria.status=active",
+		url.PathEscape(b.organization), url.PathEscape(b.project), url.PathEscape(repo),
+		url.QueryEscape(src))
+
+	resp, err := b.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to search PRs: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, b.parseError(resp)
+	}
+
+	var prList adoPullRequestList
+	if err := json.NewDecoder(resp.Body).Decode(&prList); err != nil {
+		return nil, fmt.Errorf("failed to decode PR list response: %w", err)
+	}
+
+	if len(prList.Value) == 0 {
+		return nil, nil
+	}
+
+	adoPR := prList.Value[0]
+	webURL := adoPR.Links.Web.Href
+	if webURL == "" {
+		webURL = fmt.Sprintf("https://dev.azure.com/%s/%s/_git/%s/pullrequest/%d",
+			b.organization, b.project, adoPR.Repository.Name, adoPR.PullRequestID)
+	}
+
+	return &provider.PRInfo{
+		ID:           strconv.Itoa(adoPR.PullRequestID),
+		Title:        adoPR.Title,
+		Description:  adoPR.Description,
+		Status:       adoPR.Status,
+		SourceBranch: adoPR.SourceRefName,
+		TargetBranch: adoPR.TargetRefName,
+		Author:       adoPR.CreatedBy.DisplayName,
+		URL:          webURL,
+		RepoID:       adoPR.Repository.Name,
+		Project:      b.project,
+		Organization: b.organization,
+	}, nil
+}
+
+// ensureRefPrefix adds "refs/heads/" prefix if not already present.
+func ensureRefPrefix(branch string) string {
+	if strings.HasPrefix(branch, "refs/") {
+		return branch
+	}
+	return "refs/heads/" + branch
+}

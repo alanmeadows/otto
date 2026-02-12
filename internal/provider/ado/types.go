@@ -8,6 +8,7 @@ type adoPullRequest struct {
 	Title         string      `json:"title"`
 	Description   string      `json:"description"`
 	Status        string      `json:"status"`
+	MergeStatus   string      `json:"mergeStatus"`
 	SourceRefName string      `json:"sourceRefName"`
 	TargetRefName string      `json:"targetRefName"`
 	CreatedBy     adoIdentity `json:"createdBy"`
@@ -26,7 +27,7 @@ type adoPullRequest struct {
 // adoThread represents a comment thread on a pull request.
 type adoThread struct {
 	ID            int               `json:"id"`
-	Status        int               `json:"status"`
+	Status        any               `json:"status"`
 	ThreadContext *adoThreadContext `json:"threadContext,omitempty"`
 	Comments      []adoComment      `json:"comments"`
 	PublishedDate time.Time         `json:"publishedDate"`
@@ -140,4 +141,18 @@ type adoWorkItemPatchOp struct {
 type adoWorkItem struct {
 	ID  int    `json:"id"`
 	URL string `json:"url"`
+}
+
+// adoPullRequestCreate is the request body for creating a new pull request.
+type adoPullRequestCreate struct {
+	SourceRefName string `json:"sourceRefName"`
+	TargetRefName string `json:"targetRefName"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+}
+
+// adoPullRequestList is the envelope for the pull requests list API response.
+type adoPullRequestList struct {
+	Value []adoPullRequest `json:"value"`
+	Count int              `json:"count"`
 }

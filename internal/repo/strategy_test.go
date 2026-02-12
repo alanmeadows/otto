@@ -213,9 +213,13 @@ func TestDirtyCheck(t *testing.T) {
 	require.NoError(t, err)
 	assert.False(t, dirty)
 
-	// Create a file to make it dirty
+	// Create a file and stage it to make it dirty (unstaged untracked files are not considered dirty)
 	err = os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("dirty"), 0644)
 	require.NoError(t, err)
+
+	cmd := exec.Command("git", "add", "dirty.txt")
+	cmd.Dir = dir
+	require.NoError(t, cmd.Run())
 
 	dirty, err = DirtyCheck(dir)
 	require.NoError(t, err)

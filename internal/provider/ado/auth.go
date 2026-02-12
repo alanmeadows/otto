@@ -42,6 +42,16 @@ func NewAuthProvider(pat string) *AuthProvider {
 	}
 }
 
+// InvalidateToken clears the cached Entra ID token, forcing a fresh
+// acquisition on the next GetAuthHeader call. Used when ADO returns
+// HTTP 203 (auth redirect), indicating the token has expired.
+func (a *AuthProvider) InvalidateToken() {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.cachedToken = ""
+	a.tokenExpiry = time.Time{}
+}
+
 // azTokenResponse is the JSON structure returned by `az account get-access-token`.
 type azTokenResponse struct {
 	AccessToken string `json:"accessToken"`

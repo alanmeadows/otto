@@ -238,8 +238,8 @@ func TestGetComments(t *testing.T) {
 
 	comments, err := b.GetComments(context.Background(), pr)
 	require.NoError(t, err)
-	// Should have 2 comments (system comment filtered out).
-	assert.Len(t, comments, 2)
+	// Should have 3 comments (system comments are no longer filtered).
+	assert.Len(t, comments, 3)
 
 	// General comment.
 	assert.Equal(t, "General comment", comments[0].Body)
@@ -254,6 +254,11 @@ func TestGetComments(t *testing.T) {
 	assert.True(t, comments[1].IsResolved)
 	assert.Equal(t, "/src/main.go", comments[1].FilePath)
 	assert.Equal(t, 42, comments[1].Line)
+
+	// System comment (active, no longer filtered).
+	assert.Equal(t, "System message", comments[2].Body)
+	assert.Equal(t, "3", comments[2].ThreadID)
+	assert.False(t, comments[2].IsResolved)
 }
 
 func TestPostComment(t *testing.T) {
@@ -611,21 +616,8 @@ func TestWorkflowAutoComplete(t *testing.T) {
 }
 
 func TestWorkflowCreateWorkItem(t *testing.T) {
-	var receivedBody []map[string]any
-
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !strings.Contains(r.URL.Path, "/wit/workitems") {
-			http.Error(w, "not found", http.StatusNotFound)
-			return
-		}
-
-		assert.Equal(t, "application/json-patch+json", r.Header.Get("Content-Type"))
-
-		json.NewDecoder(r.Body).Decode(&receivedBody)
-		resp := adoWorkItem{ID: 999, URL: "https://dev.azure.com/org/proj/_workitems/edit/999"}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusCreated)
-		json.NewEncoder(w).Encode(resp)
+		http.Error(w, "should not be called", http.StatusInternalServerError)
 	}))
 	defer server.Close()
 
@@ -639,13 +631,7 @@ func TestWorkflowCreateWorkItem(t *testing.T) {
 	}
 
 	err := b.RunWorkflow(context.Background(), pr, provider.WorkflowCreateWorkItem)
-	require.NoError(t, err)
-
-	// Verify patch operations.
-	require.Len(t, receivedBody, 3)
-	assert.Equal(t, "add", receivedBody[0]["op"])
-	assert.Equal(t, "/fields/System.Title", receivedBody[0]["path"])
-	assert.Contains(t, receivedBody[0]["value"], "My PR")
+	require.ErrorIs(t, err, provider.ErrUnsupported)
 }
 
 func TestWorkflowAddressBot(t *testing.T) {

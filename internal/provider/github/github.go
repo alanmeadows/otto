@@ -422,6 +422,20 @@ func (b *Backend) RunWorkflow(ctx context.Context, pr *provider.PRInfo, action p
 	return provider.ErrUnsupported
 }
 
+// CreatePR returns ErrUnsupported — GitHub PR creation is not yet implemented.
+func (b *Backend) CreatePR(ctx context.Context, params provider.CreatePRParams) (*provider.PRInfo, error) {
+	return nil, provider.ErrUnsupported
+}
+
+// FindExistingPR returns ErrUnsupported — GitHub PR search is not yet implemented.
+func (b *Backend) FindExistingPR(ctx context.Context, sourceBranch string) (*provider.PRInfo, error) {
+	return nil, provider.ErrUnsupported
+}
+
+func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
+	return provider.ErrUnsupported
+}
+
 // --- Internal helpers ---
 
 // parsePRIdentifier extracts owner, repo, and PR number from a string.

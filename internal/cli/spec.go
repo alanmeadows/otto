@@ -41,10 +41,24 @@ func init() {
 	specExecuteCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specQuestionsCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
 	specRunCmd.Flags().StringVar(&specSlugFlag, "spec", "", "Spec slug (optional if only one spec exists)")
+
+	// Add --force flags to skip question gating
+	specResearchCmd.Flags().BoolVar(&specForceFlag, "force", false, "Skip unanswered question gate")
+	specDesignCmd.Flags().BoolVar(&specForceFlag, "force", false, "Skip unanswered question gate")
+	specExecuteCmd.Flags().BoolVar(&specForceFlag, "force", false, "Skip unanswered question gate")
+
+	// Add --auto-only flag to questions command
+	specQuestionsCmd.Flags().BoolVar(&specAutoOnlyFlag, "auto-only", false, "Skip interactive resolution (auto-resolve only)")
 }
 
 // specSlugFlag is shared by commands that accept --spec.
 var specSlugFlag string
+
+// specForceFlag is shared by commands that accept --force.
+var specForceFlag bool
+
+// specAutoOnlyFlag is for the questions command.
+var specAutoOnlyFlag bool
 
 var specAddCmd = &cobra.Command{
 	Use:   "add <prompt>",
@@ -152,7 +166,7 @@ a specific spec when multiple exist.`,
 		}
 
 		slug, _ := cmd.Flags().GetString("spec")
-		if err := spec.SpecResearch(cmd.Context(), client, appConfig, repoDir, slug); err != nil {
+		if err := spec.SpecResearch(cmd.Context(), client, appConfig, repoDir, slug, specForceFlag); err != nil {
 			return err
 		}
 
@@ -184,7 +198,7 @@ a specific spec when multiple exist.`,
 		}
 
 		slug, _ := cmd.Flags().GetString("spec")
-		if err := spec.SpecDesign(cmd.Context(), client, appConfig, repoDir, slug); err != nil {
+		if err := spec.SpecDesign(cmd.Context(), client, appConfig, repoDir, slug, specForceFlag); err != nil {
 			return err
 		}
 
@@ -216,7 +230,7 @@ a specific spec when multiple exist.`,
 		}
 
 		slug, _ := cmd.Flags().GetString("spec")
-		return spec.Execute(cmd.Context(), client, appConfig, repoDir, slug)
+		return spec.Execute(cmd.Context(), client, appConfig, repoDir, slug, specForceFlag)
 	},
 }
 
@@ -243,7 +257,7 @@ phases. Use --spec to target a specific spec when multiple exist.`,
 		}
 
 		slug, _ := cmd.Flags().GetString("spec")
-		if err := spec.SpecQuestions(cmd.Context(), client, appConfig, repoDir, slug); err != nil {
+		if err := spec.SpecQuestions(cmd.Context(), client, appConfig, repoDir, slug, specAutoOnlyFlag); err != nil {
 			return err
 		}
 

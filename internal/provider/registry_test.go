@@ -44,6 +44,15 @@ func (m *mockBackend) ResolveComment(ctx context.Context, pr *provider.PRInfo, t
 func (m *mockBackend) RunWorkflow(ctx context.Context, pr *provider.PRInfo, action provider.WorkflowAction) error {
 	return nil
 }
+func (m *mockBackend) CreatePR(ctx context.Context, params provider.CreatePRParams) (*provider.PRInfo, error) {
+	return nil, provider.ErrUnsupported
+}
+func (m *mockBackend) FindExistingPR(ctx context.Context, sourceBranch string) (*provider.PRInfo, error) {
+	return nil, provider.ErrUnsupported
+}
+func (m *mockBackend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
+	return nil
+}
 
 func TestDetect(t *testing.T) {
 	reg := provider.NewRegistry()

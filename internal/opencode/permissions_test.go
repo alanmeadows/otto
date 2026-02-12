@@ -35,10 +35,11 @@ func TestEnsurePermissions(t *testing.T) {
 	err := EnsurePermissions(dir)
 	require.NoError(t, err)
 
-	configPath := filepath.Join(dir, "opencode.json")
-	assert.FileExists(t, configPath)
+	// Real file lives in .otto/
+	realPath := filepath.Join(dir, ".otto", "opencode.json")
+	assert.FileExists(t, realPath)
 
-	data, err := os.ReadFile(configPath)
+	data, err := os.ReadFile(realPath)
 	require.NoError(t, err)
 
 	var cfg PermissionConfig
@@ -48,6 +49,17 @@ func TestEnsurePermissions(t *testing.T) {
 	assert.Equal(t, "allow", cfg.Permission["edit"])
 	assert.Equal(t, "allow", cfg.Permission["bash"])
 	assert.Len(t, cfg.Permission, 16)
+
+	// Root-level path should be a symlink to .otto/opencode.json.
+	linkPath := filepath.Join(dir, "opencode.json")
+	target, err := os.Readlink(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, filepath.Join(".otto", "opencode.json"), target)
+
+	// Should be readable through the symlink.
+	linkData, err := os.ReadFile(linkPath)
+	require.NoError(t, err)
+	assert.Equal(t, data, linkData)
 }
 
 func TestEnsurePermissionsCreatesDirectory(t *testing.T) {
@@ -56,6 +68,7 @@ func TestEnsurePermissionsCreatesDirectory(t *testing.T) {
 	err := EnsurePermissions(dir)
 	require.NoError(t, err)
 
+	assert.FileExists(t, filepath.Join(dir, ".otto", "opencode.json"))
 	assert.FileExists(t, filepath.Join(dir, "opencode.json"))
 }
 
@@ -66,7 +79,7 @@ func TestEnsurePermissionsIdempotent(t *testing.T) {
 	require.NoError(t, EnsurePermissions(dir))
 	require.NoError(t, EnsurePermissions(dir))
 
-	data, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	data, err := os.ReadFile(filepath.Join(dir, ".otto", "opencode.json"))
 	require.NoError(t, err)
 
 	var cfg PermissionConfig
@@ -78,7 +91,7 @@ func TestEnsurePermissionsJSONFormat(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, EnsurePermissions(dir))
 
-	data, err := os.ReadFile(filepath.Join(dir, "opencode.json"))
+	data, err := os.ReadFile(filepath.Join(dir, ".otto", "opencode.json"))
 	require.NoError(t, err)
 
 	// Should be valid, pretty-printed JSON

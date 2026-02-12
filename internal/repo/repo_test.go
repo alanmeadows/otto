@@ -145,10 +145,79 @@ func TestNormalizeGitURLVariants(t *testing.T) {
 	}{
 		{"https://github.com/org/repo/", "github.com/org/repo"},
 		{"  git@github.com:org/repo.git  ", "github.com/org/repo"},
+		// ADO visualstudio.com → dev.azure.com normalization
+		{"https://msazure.visualstudio.com/DefaultCollection/One/_git/azlocal-overlay", "dev.azure.com/msazure/one/_git/azlocal-overlay"},
+		{"https://msazure.visualstudio.com/One/_git/azlocal-overlay", "dev.azure.com/msazure/one/_git/azlocal-overlay"},
+		{"https://dev.azure.com/msazure/One/_git/azlocal-overlay", "dev.azure.com/msazure/one/_git/azlocal-overlay"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
 			assert.Equal(t, tt.expected, normalizeGitURL(tt.input))
 		})
 	}
+}
+
+func TestStripPRPath(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"ado PR URL", "https://dev.azure.com/msazure/One/_git/azlocal-overlay/pullrequest/14708380", "https://dev.azure.com/msazure/One/_git/azlocal-overlay"},
+		{"github PR URL", "https://github.com/org/repo/pull/42", "https://github.com/org/repo"},
+		{"plain repo URL", "https://github.com/org/repo", "https://github.com/org/repo"},
+		{"ado repo URL no PR", "https://dev.azure.com/msazure/One/_git/azlocal-overlay", "https://dev.azure.com/msazure/One/_git/azlocal-overlay"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, stripPRPath(tt.input))
+		})
+	}
+}
+
+func TestFindByRemoteURL_WithPRURL(t *testing.T) {
+	dir := t.TempDir()
+	primaryDir := filepath.Join(dir, "myrepo")
+	require.NoError(t, os.MkdirAll(primaryDir, 0755))
+
+	initGitRepo(t, primaryDir)
+	cmd := exec.Command("git", "remote", "add", "origin", "https://dev.azure.com/msazure/One/_git/azlocal-overlay")
+	cmd.Dir = primaryDir
+	require.NoError(t, cmd.Run())
+
+	mgr := NewManager(dir)
+	cfg := &config.Config{
+		Repos: []config.RepoConfig{
+			{Name: "overlay", PrimaryDir: primaryDir},
+		},
+	}
+
+	// Should match even when the URL has /pullrequest/ID appended.
+	found, err := mgr.FindByRemoteURL(cfg, "https://dev.azure.com/msazure/One/_git/azlocal-overlay/pullrequest/14708380")
+	require.NoError(t, err)
+	assert.Equal(t, "overlay", found.Name)
+}
+
+func TestFindByRemoteURL_CrossDomainADO(t *testing.T) {
+	dir := t.TempDir()
+	primaryDir := filepath.Join(dir, "myrepo")
+	require.NoError(t, os.MkdirAll(primaryDir, 0755))
+
+	// Repo uses visualstudio.com remote (common for older ADO repos).
+	initGitRepo(t, primaryDir)
+	cmd := exec.Command("git", "remote", "add", "origin", "https://msazure.visualstudio.com/DefaultCollection/One/_git/azlocal-overlay")
+	cmd.Dir = primaryDir
+	require.NoError(t, cmd.Run())
+
+	mgr := NewManager(dir)
+	cfg := &config.Config{
+		Repos: []config.RepoConfig{
+			{Name: "overlay", PrimaryDir: primaryDir},
+		},
+	}
+
+	// PR URL uses dev.azure.com — should still match after normalization.
+	found, err := mgr.FindByRemoteURL(cfg, "https://dev.azure.com/msazure/One/_git/azlocal-overlay/pullrequest/14708380")
+	require.NoError(t, err)
+	assert.Equal(t, "overlay", found.Name)
 }

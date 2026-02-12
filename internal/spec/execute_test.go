@@ -287,7 +287,7 @@ func TestCommitPhase(t *testing.T) {
 	cmd.Dir = dir
 	out, err := cmd.Output()
 	require.NoError(t, err)
-	assert.Contains(t, string(out), "otto: phase 1")
+	assert.Contains(t, string(out), "phase 1")
 	assert.Contains(t, string(out), "Test Task")
 }
 
@@ -315,7 +315,7 @@ func TestExecute_EmptyTasks(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "empty-tasks")
+	err := Execute(context.Background(), mock, cfg, repoDir, "empty-tasks", true)
 	require.NoError(t, err)
 
 	// No sessions should have been created.
@@ -346,7 +346,7 @@ func TestExecute_AllCompleted(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "all-done")
+	err := Execute(context.Background(), mock, cfg, repoDir, "all-done", true)
 	require.NoError(t, err)
 
 	// No prompts sent since all phases were skipped.
@@ -369,7 +369,7 @@ func TestExecute_SinglePhase(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "single-phase")
+	err := Execute(context.Background(), mock, cfg, repoDir, "single-phase", true)
 	require.NoError(t, err)
 
 	// Verify task completed.
@@ -406,7 +406,7 @@ func TestExecute_MultiPhase(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "multi-phase")
+	err := Execute(context.Background(), mock, cfg, repoDir, "multi-phase", true)
 	require.NoError(t, err)
 
 	// Both tasks completed.
@@ -445,7 +445,7 @@ func TestExecute_SkipsCompletedPhases(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "skip-phase")
+	err := Execute(context.Background(), mock, cfg, repoDir, "skip-phase", true)
 	require.NoError(t, err)
 
 	// Phase 1 was skipped, phase 2 was executed.
@@ -472,7 +472,7 @@ func TestExecute_CrashRecovery(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "crash-recovery")
+	err := Execute(context.Background(), mock, cfg, repoDir, "crash-recovery", true)
 	require.NoError(t, err)
 
 	// Verify task was completed (crash recovery reset to pending, then ran).
@@ -504,7 +504,7 @@ func TestExecute_RetryLogic(t *testing.T) {
 	cfg := defaultTestConfig()
 	cfg.Spec.MaxTaskRetries = 2
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "retry-test")
+	err := Execute(context.Background(), mock, cfg, repoDir, "retry-test", true)
 	require.NoError(t, err)
 
 	// Task should be completed after retry.
@@ -533,7 +533,7 @@ func TestExecute_ContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately.
 
-	err := Execute(ctx, mock, cfg, repoDir, "cancel-test")
+	err := Execute(ctx, mock, cfg, repoDir, "cancel-test", true)
 	assert.Error(t, err)
 	assert.ErrorIs(t, err, context.Canceled)
 }
@@ -563,7 +563,7 @@ func TestExecute_FileOverlap(t *testing.T) {
 	cfg := defaultTestConfig()
 
 	// Should not crash despite overlapping files.
-	err := Execute(context.Background(), mock, cfg, repoDir, "overlap-test")
+	err := Execute(context.Background(), mock, cfg, repoDir, "overlap-test", true)
 	require.NoError(t, err)
 
 	// Both tasks should still complete.
@@ -591,15 +591,15 @@ func TestExecute_PhaseCommit(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "commit-test")
+	err := Execute(context.Background(), mock, cfg, repoDir, "commit-test", true)
 	require.NoError(t, err)
 
-	// Verify a commit was made with "otto: phase" in the message.
+	// Verify a commit was made with "phase" in the message.
 	cmd := exec.Command("git", "log", "--oneline")
 	cmd.Dir = repoDir
 	out, err := cmd.Output()
 	require.NoError(t, err)
-	assert.Contains(t, string(out), "otto: phase")
+	assert.Contains(t, string(out), "phase")
 }
 
 func TestExecute_MissingPrerequisites(t *testing.T) {
@@ -622,7 +622,7 @@ func TestExecute_MissingPrerequisites(t *testing.T) {
 	mock := opencode.NewMockLLMClient()
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "exec-prereq")
+	err := Execute(context.Background(), mock, cfg, repoDir, "exec-prereq", true)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "design.md")
 }
@@ -644,7 +644,7 @@ func TestExecute_PhaseSummaryWritten(t *testing.T) {
 	mock.DefaultResult = "Phase summary content"
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "summary-test")
+	err := Execute(context.Background(), mock, cfg, repoDir, "summary-test", true)
 	require.NoError(t, err)
 
 	// Verify that history/phase-1-summary.md exists.
@@ -669,10 +669,10 @@ func TestExecute_QuestionsHarvested(t *testing.T) {
 	repoDir := setupExecuteRepo(t, "harvest-test", tasksMD)
 
 	mock := opencode.NewMockLLMClient()
-	mock.DefaultResult = "Some harvested question content"
+	mock.DefaultResult = "## Q1: Test question\n- **source**: phase-1-harvest\n- **status**: unanswered\n- **question**: Is this working?"
 	cfg := defaultTestConfig()
 
-	err := Execute(context.Background(), mock, cfg, repoDir, "harvest-test")
+	err := Execute(context.Background(), mock, cfg, repoDir, "harvest-test", true)
 	require.NoError(t, err)
 
 	// Verify that questions.md was created/appended to.

@@ -17,7 +17,6 @@ type Config struct {
 type ModelsConfig struct {
 	Primary   string `json:"primary"`
 	Secondary string `json:"secondary"`
-	Tertiary  string `json:"tertiary"`
 }
 
 // OpenCodeConfig controls the OpenCode server integration.
@@ -48,6 +47,8 @@ type ProviderConfig struct {
 	AutoComplete   bool   `json:"auto_complete,omitempty"`
 	MerlinBot      bool   `json:"merlinbot,omitempty"`
 	CreateWorkItem bool   `json:"create_work_item,omitempty"`
+	// WorkItemAreaPath is the ADO area path for created work items (e.g., "One\\Compute\\AzLocal").
+	WorkItemAreaPath string `json:"work_item_area_path,omitempty"`
 
 	// GitHub fields
 	Token string `json:"token,omitempty"`
@@ -83,7 +84,7 @@ type ServerConfig struct {
 func (s ServerConfig) ParsePollInterval() time.Duration {
 	d, err := time.ParseDuration(s.PollInterval)
 	if err != nil {
-		return 2 * time.Minute
+		return 10 * time.Minute
 	}
 	return d
 }
@@ -131,7 +132,6 @@ func DefaultConfig() Config {
 		Models: ModelsConfig{
 			Primary:   "github-copilot/claude-opus-4.6",
 			Secondary: "github-copilot/gpt-5.2-codex",
-			Tertiary:  "github-copilot/gemini-3-pro-preview",
 		},
 		OpenCode: OpenCodeConfig{
 			URL:         "http://localhost:4096",
@@ -145,7 +145,7 @@ func DefaultConfig() Config {
 			Providers:       make(map[string]ProviderConfig),
 		},
 		Server: ServerConfig{
-			PollInterval: "2m",
+			PollInterval: "10m",
 			Port:         4097,
 			LogDir:       "~/.local/share/otto/logs",
 		},

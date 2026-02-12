@@ -81,11 +81,6 @@ func RunTask(
 
 	fmt.Fprintf(os.Stderr, "  ▶ %s: %s\n", task.ID, task.Title)
 
-	// Ensure OpenCode permissions.
-	if err := opencode.EnsurePermissions(repoDir); err != nil {
-		return fmt.Errorf("ensuring permissions: %w", err)
-	}
-
 	// Create session scoped to the repo directory.
 	session, err := client.CreateSession(ctx, fmt.Sprintf("task-%s", task.ID), repoDir)
 	if err != nil {

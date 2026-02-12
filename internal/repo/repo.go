@@ -69,7 +69,7 @@ func (m *Manager) List(cfg *config.Config) []config.RepoConfig {
 
 // FindByRemoteURL finds a repo by matching its git remote URL.
 func (m *Manager) FindByRemoteURL(cfg *config.Config, remoteURL string) (*config.RepoConfig, error) {
-	normalizedTarget := normalizeGitURL(remoteURL)
+	normalizedTarget := normalizeGitURL(stripPRPath(remoteURL))
 
 	for i := range cfg.Repos {
 		r := &cfg.Repos[i]
@@ -146,8 +146,23 @@ func getRemoteURL(dir string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// stripPRPath removes PR-specific path segments from a URL so it can be matched
+// against a git remote.  Handles ADO (/pullrequest/{id}) and GitHub (/pull/{id}).
+func stripPRPath(url string) string {
+	// ADO: …/_git/repo/pullrequest/12345 → …/_git/repo
+	if idx := strings.Index(url, "/pullrequest/"); idx != -1 {
+		return url[:idx]
+	}
+	// GitHub: …/owner/repo/pull/42 → …/owner/repo
+	if idx := strings.Index(url, "/pull/"); idx != -1 {
+		return url[:idx]
+	}
+	return url
+}
+
 // normalizeGitURL normalizes a git URL for comparison.
 // Strips .git suffix and extracts host/path for comparison.
+// Also normalizes Azure DevOps URL variants to a canonical form.
 func normalizeGitURL(url string) string {
 	url = strings.TrimSpace(url)
 	url = strings.TrimSuffix(url, ".git")
@@ -165,5 +180,24 @@ func normalizeGitURL(url string) string {
 	// Normalize trailing slash
 	url = strings.TrimSuffix(url, "/")
 
-	return strings.ToLower(url)
+	url = strings.ToLower(url)
+
+	// Normalize Azure DevOps URL variants to a canonical form.
+	// {org}.visualstudio.com/DefaultCollection/{project}/_git/{repo}
+	//   → dev.azure.com/{org}/{project}/_git/{repo}
+	// {org}.visualstudio.com/{project}/_git/{repo}
+	//   → dev.azure.com/{org}/{project}/_git/{repo}
+	if strings.Contains(url, ".visualstudio.com") {
+		// Extract org from hostname: {org}.visualstudio.com/...
+		parts := strings.SplitN(url, ".visualstudio.com/", 2)
+		if len(parts) == 2 {
+			org := parts[0]
+			path := parts[1]
+			// Strip optional DefaultCollection/ prefix
+			path = strings.TrimPrefix(path, "defaultcollection/")
+			url = "dev.azure.com/" + org + "/" + path
+		}
+	}
+
+	return url
 }

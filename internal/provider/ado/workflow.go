@@ -67,58 +67,10 @@ func (b *Backend) workflowAutoComplete(ctx context.Context, pr *provider.PRInfo)
 	return nil
 }
 
-// workflowCreateWorkItem creates a Task work item linked to the PR.
+// workflowCreateWorkItem is deprecated — work items are now created via copilot comment trigger
+// in the submitPR orchestrator (PostCommentThread with "copilot: generateworkitem" body).
 func (b *Backend) workflowCreateWorkItem(ctx context.Context, pr *provider.PRInfo) error {
-	org := b.resolveOrg(pr)
-	project := b.resolveProject(pr)
-
-	// Create work item with JSON Patch content type.
-	path := fmt.Sprintf("/%s/%s/_apis/wit/workitems/$Task",
-		url.PathEscape(org), url.PathEscape(project))
-
-	ops := []adoWorkItemPatchOp{
-		{
-			Op:    "add",
-			Path:  "/fields/System.Title",
-			Value: fmt.Sprintf("Follow-up: %s", pr.Title),
-		},
-		{
-			Op:   "add",
-			Path: "/fields/System.Description",
-			Value: fmt.Sprintf("Auto-created from PR #%s: %s\n\n%s",
-				pr.ID, pr.Title, pr.URL),
-		},
-		{
-			Op:   "add",
-			Path: "/relations/-",
-			Value: map[string]any{
-				"rel": "ArtifactLink",
-				"url": pr.URL,
-				"attributes": map[string]string{
-					"name": "Pull Request",
-				},
-			},
-		},
-	}
-
-	resp, err := b.doRequestWithContentType(ctx, http.MethodPost, path, ops, "application/json-patch+json")
-	if err != nil {
-		return fmt.Errorf("failed to create work item: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
-		return b.parseError(resp)
-	}
-
-	var wi adoWorkItem
-	if err := json.NewDecoder(resp.Body).Decode(&wi); err != nil {
-		slog.Warn("work item created but could not decode response", "error", err)
-		return nil
-	}
-
-	slog.Info("work item created", "workItemID", wi.ID, "prID", pr.ID)
-	return nil
+	return provider.ErrUnsupported
 }
 
 // workflowAddressBot identifies MerlinBot comment threads and logs them

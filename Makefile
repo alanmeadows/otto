@@ -17,8 +17,9 @@ lint:
 vet:
 	go vet ./...
 
-install:
-	go install ./cmd/otto
+install: build
+	@mkdir -p ~/.local/bin
+	cp bin/otto ~/.local/bin/otto
 
 clean:
 	rm -rf ./bin/

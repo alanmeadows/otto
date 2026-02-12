@@ -32,6 +32,19 @@ func PIDFilePath() string {
 	return filepath.Join(dataDir, "otto", "ottod.pid")
 }
 
+// LogFilePath returns the path to the daemon log file.
+func LogFilePath() string {
+	dataDir := os.Getenv("XDG_DATA_HOME")
+	if dataDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil || home == "" {
+			return ""
+		}
+		dataDir = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(dataDir, "otto", "logs", "ottod.log")
+}
+
 // StartDaemon forks the current process as a daemon.
 // If foreground is true, runs the server inline without forking.
 func StartDaemon(port int, logDir string, foreground bool) error {
@@ -51,7 +64,27 @@ func StartDaemon(port int, logDir string, foreground bool) error {
 	})
 }
 
+// expandHome replaces a leading "~/" in a path with the user's home directory.
+// If the path does not start with "~/" or the home directory cannot be determined,
+// the path is returned unchanged.
+func expandHome(path string) string {
+	if !strings.HasPrefix(path, "~/") && path != "~" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
+
 func forkDaemon(port int, logDir string) error {
+	// Expand ~ in log directory path.
+	logDir = expandHome(logDir)
+
 	// Create log directory.
 	if logDir == "" {
 		dataDir := os.Getenv("XDG_DATA_HOME")

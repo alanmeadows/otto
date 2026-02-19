@@ -1,12 +1,16 @@
 package spec
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 
+	"github.com/alanmeadows/otto/internal/config"
+	"github.com/alanmeadows/otto/internal/opencode"
 	"github.com/alanmeadows/otto/internal/store"
 )
 
@@ -168,6 +172,7 @@ var slugRegexp = regexp.MustCompile(`[^a-z0-9-]+`)
 var multiHyphen = regexp.MustCompile(`-{2,}`)
 
 // GenerateSlug sanitizes a prompt string to a kebab-case slug, truncated to 50 characters.
+// This is a deterministic fallback — prefer GenerateSlugWithLLM for short, meaningful slugs.
 func GenerateSlug(prompt string) string {
 	s := strings.ToLower(strings.TrimSpace(prompt))
 	s = slugRegexp.ReplaceAllString(s, "-")
@@ -183,5 +188,71 @@ func GenerateSlug(prompt string) string {
 	if s == "" {
 		s = "spec"
 	}
+	return s
+}
+
+// GenerateSlugWithLLM uses the LLM to produce a short, descriptive kebab-case
+// slug (≤24 chars) that captures the essence of a spec prompt.
+// Falls back to the deterministic GenerateSlug if the LLM call fails.
+func GenerateSlugWithLLM(
+	ctx context.Context,
+	client opencode.LLMClient,
+	cfg *config.Config,
+	repoDir string,
+	prompt string,
+) string {
+	slugPrompt := fmt.Sprintf(
+		"Generate a short kebab-case slug (maximum 24 characters) that captures the essence of this task:\n\n%s\n\n"+
+			"Rules:\n"+
+			"- Use only lowercase letters, numbers, and hyphens\n"+
+			"- Maximum 24 characters\n"+
+			"- Be descriptive and meaningful — distill the core concept\n"+
+			"- Reply with ONLY the slug text, nothing else — no explanation, no quotes, no backticks",
+		prompt,
+	)
+
+	session, err := client.CreateSession(ctx, "slug-gen", repoDir)
+	if err != nil {
+		slog.Debug("LLM slug generation failed, using fallback", "error", err)
+		return GenerateSlug(prompt)
+	}
+	defer func() { _ = client.DeleteSession(ctx, session.ID, repoDir) }()
+
+	model := opencode.ParseModelRef(cfg.Models.Primary)
+	resp, err := client.SendPrompt(ctx, session.ID, slugPrompt+opencode.NoToolsInstruction, model, repoDir)
+	if err != nil || resp == nil || strings.TrimSpace(resp.Content) == "" {
+		slog.Debug("LLM slug generation failed, using fallback", "error", err)
+		return GenerateSlug(prompt)
+	}
+
+	slug := SanitizeLLMSlug(resp.Content)
+	if slug == "" {
+		return GenerateSlug(prompt)
+	}
+	return slug
+}
+
+// SanitizeLLMSlug cleans up raw LLM output to produce a valid ≤24 char slug.
+func SanitizeLLMSlug(raw string) string {
+	// Take only the first line in case the LLM added explanation.
+	s := strings.TrimSpace(raw)
+	if idx := strings.IndexByte(s, '\n'); idx >= 0 {
+		s = s[:idx]
+	}
+	// Strip surrounding quotes or backticks the LLM may have added.
+	s = strings.Trim(s, "`\"'")
+	s = strings.TrimSpace(s)
+
+	// Apply standard slug sanitization.
+	s = strings.ToLower(s)
+	s = slugRegexp.ReplaceAllString(s, "-")
+	s = multiHyphen.ReplaceAllString(s, "-")
+	s = strings.Trim(s, "-")
+
+	if len(s) > 24 {
+		s = s[:24]
+		s = strings.TrimRight(s, "-")
+	}
+
 	return s
 }

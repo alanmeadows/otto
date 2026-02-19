@@ -127,6 +127,12 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 		}
 		if cycle > 0 && artifact != "" {
 			currentPrompt = fmt.Sprintf("Here is the current version of the artifact:\n\n%s\n\nPlease refine and improve it based on any issues you identify.\n\nOriginal instructions:\n%s", artifact, prompt)
+			// Re-append contextData so subsequent cycles retain upstream context.
+			if len(contextData) > 0 {
+				for k, v := range contextData {
+					currentPrompt += fmt.Sprintf("\n\n## %s\n\n%s", k, v)
+				}
+			}
 		}
 
 		artifact, err = p.generate(ctx, p.primary, currentPrompt)
@@ -137,8 +143,8 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 
 		preReviewArtifact := artifact
 
-		// Pass 2: Secondary critiques
-		critique, err := p.critique(ctx, p.secondary, artifact)
+		// Pass 2: Secondary critiques (with upstream context so it can validate against requirements/research)
+		critique, err := p.critique(ctx, p.secondary, artifact, contextData)
 		if err != nil {
 			slog.Warn("secondary critique failed, continuing with primary output", "error", err)
 			continue
@@ -146,8 +152,8 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 		slog.Debug("secondary critique received", "length", len(critique))
 		stats.SecondaryCritiqueItems += countCritiqueItems(critique)
 
-		// Pass 3: Primary incorporates feedback
-		artifact, err = p.refine(ctx, p.primary, artifact, critique)
+		// Pass 3: Primary incorporates feedback (with upstream context to validate critique)
+		artifact, err = p.refine(ctx, p.primary, artifact, critique, contextData)
 		if err != nil {
 			return "", stats, fmt.Errorf("primary refinement (cycle %d): %w", cycle+1, err)
 		}
@@ -160,11 +166,12 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextData 
 	return artifact, stats, nil
 }
 
-// noToolsInstruction is appended to all review-pipeline prompts to prevent the
-// LLM from writing files directly via OpenCode tools. The review pipeline
-// expects the artifact as response text — if the LLM writes files instead,
-// we capture only a summary and the actual content gets overwritten.
-const noToolsInstruction = `
+// NoToolsInstruction is appended to prompts where the LLM should return
+// text output only — no file editing, shell commands, or other tools.
+// The review pipeline expects the artifact as response text — if the LLM
+// writes files instead, we capture only a summary and the actual content
+// gets overwritten.
+const NoToolsInstruction = `
 
 CRITICAL: Return ALL output directly in your response text. Do NOT use any file editing tools, shell commands, or other tools — your response text IS the deliverable. Do not write, create, or modify any files.`
 
@@ -176,7 +183,7 @@ func (p *ReviewPipeline) generate(ctx context.Context, model ModelRef, prompt st
 	}
 	defer p.client.DeleteSession(ctx, session.ID, p.directory)
 
-	resp, err := p.client.SendPrompt(ctx, session.ID, prompt+noToolsInstruction, model, p.directory)
+	resp, err := p.client.SendPrompt(ctx, session.ID, prompt+NoToolsInstruction, model, p.directory)
 	if err != nil {
 		return "", err
 	}
@@ -184,17 +191,30 @@ func (p *ReviewPipeline) generate(ctx context.Context, model ModelRef, prompt st
 }
 
 // critique reviews an artifact using the given model with the review.md prompt.
-func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact string) (string, error) {
+// contextData provides upstream context (requirements, research, etc.) so the
+// secondary model can validate the artifact against its source material.
+func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact string, contextData map[string]string) (string, error) {
 	session, err := p.client.CreateSession(ctx, "critique", p.directory)
 	if err != nil {
 		return "", err
 	}
 	defer p.client.DeleteSession(ctx, session.ID, p.directory)
 
+	// Serialize upstream context for the review template.
+	var contextStr string
+	if len(contextData) > 0 {
+		var sb strings.Builder
+		for k, v := range contextData {
+			fmt.Fprintf(&sb, "### %s\n\n%s\n\n", k, v)
+		}
+		contextStr = sb.String()
+	}
+
 	// Build review prompt from template
 	reviewPrompt, err := prompts.Execute("review.md", map[string]string{
 		"artifact":      artifact,
 		"artifact_type": "document",
+		"context":       contextStr,
 	})
 	if err != nil {
 		// Fallback to inline prompt if template fails — log the error since
@@ -203,7 +223,7 @@ func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact 
 		reviewPrompt = fmt.Sprintf("Critically review the following artifact. Identify gaps, errors, inconsistencies, missing considerations, and areas for improvement. Be specific and actionable.\n\n---\n\n%s", artifact)
 	}
 
-	resp, err := p.client.SendPrompt(ctx, session.ID, reviewPrompt+noToolsInstruction, model, p.directory)
+	resp, err := p.client.SendPrompt(ctx, session.ID, reviewPrompt+NoToolsInstruction, model, p.directory)
 	if err != nil {
 		return "", err
 	}
@@ -211,7 +231,9 @@ func (p *ReviewPipeline) critique(ctx context.Context, model ModelRef, artifact 
 }
 
 // refine incorporates review feedback into the artifact.
-func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, critique string) (string, error) {
+// contextData provides upstream context (requirements, research, etc.) so the
+// primary model can validate critique against source material before accepting it.
+func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, critique string, contextData map[string]string) (string, error) {
 	session, err := p.client.CreateSession(ctx, "refine", p.directory)
 	if err != nil {
 		return "", err
@@ -228,7 +250,15 @@ func (p *ReviewPipeline) refine(ctx context.Context, model ModelRef, artifact, c
 
 %s`, artifact, critique)
 
-	prompt += "\n\n## Instructions\n\nProduce the complete, final version of the artifact incorporating all valid feedback. Output ONLY the artifact content — no preamble, no commentary." + noToolsInstruction
+	// Include upstream context so the model can validate critique against source material.
+	if len(contextData) > 0 {
+		prompt += "\n\n## Upstream Context\n\nUse this context to validate the review feedback — reject suggestions that contradict requirements, research findings, or established constraints.\n"
+		for k, v := range contextData {
+			prompt += fmt.Sprintf("\n### %s\n\n%s\n", k, v)
+		}
+	}
+
+	prompt += "\n\n## Instructions\n\nProduce the complete, final version of the artifact incorporating all valid feedback. Output ONLY the artifact content — no preamble, no commentary." + NoToolsInstruction
 
 	resp, err := p.client.SendPrompt(ctx, session.ID, prompt, model, p.directory)
 	if err != nil {

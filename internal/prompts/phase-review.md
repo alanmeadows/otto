@@ -30,7 +30,9 @@ The following phases have already been completed and committed. Use this context
 
 ## Output
 
-List every issue found with its location and a specific fix. If no issues are found, say so explicitly.
+Return your review as a markdown report. Do NOT use any file editing tools, shell commands, or other tools — your response text IS the deliverable.
+
+List every issue found with its location and a specific fix. If no issues are found, say "NO ISSUES FOUND" explicitly.
 
 For each issue:
 ```
@@ -39,4 +41,12 @@ For each issue:
 **Fix**: <exact change to make>
 ```
 
-After listing issues, fix them all. Edit the files directly to resolve every issue you identified.
+At the very end of your report, include a structured summary line in **exactly** this format:
+
+```
+**Issues: <number>**
+```
+
+For example: `**Issues: 3**` if you found three items, or `**Issues: 0**` if the code is clean. This line is machine-parsed — do not deviate from the format.
+
+CRITICAL: Do NOT edit any files. Only produce the review report as text output.

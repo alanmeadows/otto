@@ -1,6 +1,9 @@
 package cli
 
 import (
+	"fmt"
+	"os"
+
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/logging"
 	"github.com/spf13/cobra"
@@ -24,7 +27,9 @@ tasks, executes them via an LLM coding agent, and monitors PRs for review
 feedback — closing the loop automatically.
 
 Run 'otto <command> --help' for details on any subcommand.`,
-		Version: Version,
+		Version:       Version,
+		SilenceUsage:  true,
+		SilenceErrors: true,
 	}
 )
 
@@ -55,5 +60,9 @@ func init() {
 }
 
 func Execute() error {
-	return rootCmd.Execute()
+	err := rootCmd.Execute()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
+	}
+	return err
 }

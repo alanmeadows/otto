@@ -65,9 +65,10 @@ var specAddCmd = &cobra.Command{
 	Short: "Add a new specification",
 	Long: `Create a new specification from a natural-language prompt.
 
-The LLM generates a slug and initial spec document under
-.otto/specs/<slug>/. The prompt should clearly describe the
-feature or change you want to implement.`,
+The LLM generates a short slug and creates .otto/specs/<slug>/ with a
+seed requirements.md containing your goal. This is fast — no codebase
+analysis runs here. Edit the seed or run 'otto spec requirements' next
+to expand it into full AI-generated requirements.`,
 	Example: `  otto spec add "Add retry logic to the HTTP client"
   otto spec add "Refactor database layer to use connection pooling"`,
 	Args: cobra.ExactArgs(1),
@@ -88,7 +89,7 @@ feature or change you want to implement.`,
 			return err
 		}
 
-		fmt.Fprintf(cmd.OutOrStdout(), "Created spec: %s\nPath: %s\n", s.Slug, s.Dir)
+		fmt.Fprintf(cmd.OutOrStdout(), "Created spec: %s\nPath: %s\nSeed: %s\n\nNext: edit requirements.md or run 'otto spec requirements --spec %s'\n", s.Slug, s.Dir, s.RequirementsPath, s.Slug)
 		return nil
 	},
 }

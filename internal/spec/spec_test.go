@@ -250,3 +250,72 @@ func TestGenerateSlug(t *testing.T) {
 		})
 	}
 }
+
+func TestSanitizeLLMSlug(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{
+			name: "clean slug",
+			raw:  "fault-injection",
+			want: "fault-injection",
+		},
+		{
+			name: "with backticks",
+			raw:  "`fault-injection`",
+			want: "fault-injection",
+		},
+		{
+			name: "with quotes",
+			raw:  `"fault-injection"`,
+			want: "fault-injection",
+		},
+		{
+			name: "with explanation after newline",
+			raw:  "fault-injection\nThis slug captures the core concept.",
+			want: "fault-injection",
+		},
+		{
+			name: "uppercase normalized",
+			raw:  "Fault-Injection",
+			want: "fault-injection",
+		},
+		{
+			name: "too long truncated",
+			raw:  "add-fault-injection-capabilities-overlay",
+			want: "add-fault-injection-capa",
+		},
+		{
+			name: "trailing hyphen after truncation",
+			raw:  "add-fault-injection-cap",
+			want: "add-fault-injection-cap",
+		},
+		{
+			name: "special chars removed",
+			raw:  "fault_injection! (v2)",
+			want: "fault-injection-v2",
+		},
+		{
+			name: "empty returns empty",
+			raw:  "",
+			want: "",
+		},
+		{
+			name: "whitespace with backticks",
+			raw:  "  `az-fault-inject`  ",
+			want: "az-fault-inject",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := SanitizeLLMSlug(tt.raw)
+			assert.Equal(t, tt.want, got)
+			if got != "" {
+				assert.LessOrEqual(t, len(got), 24)
+			}
+		})
+	}
+}

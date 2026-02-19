@@ -14,6 +14,16 @@ You are reviewing a pull request. Your job is to identify **real problems** — 
 {{.codebase_summary}}
 {{end}}
 
+{{if .guidance}}
+## Reviewer Guidance
+
+The reviewer has asked you to pay special attention to the following:
+
+> {{.guidance}}
+
+Keep this guidance in mind throughout the review. It should influence your focus and prioritization, but do not ignore other real issues you discover.
+{{end}}
+
 ## Instructions
 
 ### Step 1: Identify What Changed

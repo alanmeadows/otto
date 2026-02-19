@@ -28,7 +28,7 @@ type reviewComment struct {
 }
 
 var prReviewCmd = &cobra.Command{
-	Use:   "review <url>",
+	Use:   "review <url> [guidance]",
 	Short: "Review a pull request",
 	Long: `Perform an LLM-powered code review on a pull request.
 
@@ -36,13 +36,22 @@ Otto clones/checks-out the PR branch, sends the diff and codebase
 context to the LLM, and presents the resulting review comments in a
 table. You then interactively select which comments to post as
 inline review comments on the PR. A summary comment is posted
-automatically.`,
+automatically.
+
+An optional guidance argument can be provided to steer the review
+focus, e.g. "focus on error handling" or "check for race conditions
+in the worker pool".`,
 	Example: `  otto pr review https://github.com/org/repo/pull/42
-  otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123`,
-	Args: cobra.ExactArgs(1),
+  otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123
+  otto pr review https://github.com/org/repo/pull/42 "focus on error handling and concurrency safety"`,
+	Args: cobra.RangeArgs(1, 2),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := cmd.Context()
 		prURL := args[0]
+		var guidance string
+		if len(args) > 1 {
+			guidance = args[1]
+		}
 
 		// Step 1: Detect backend from URL.
 		reg := buildRegistry()
@@ -101,6 +110,9 @@ automatically.`,
 		}
 		if summary != nil {
 			templateData["codebase_summary"] = summary.String()
+		}
+		if guidance != "" {
+			templateData["guidance"] = guidance
 		}
 
 		prompt, err := prompts.Execute("pr-review.md", templateData)
@@ -200,12 +212,6 @@ automatically.`,
 			return fmt.Errorf("posting comments: %w", err)
 		}
 
-		// Step 11: Post optional summary comment.
-		reviewSummary := buildReviewSummary(comments, selected)
-		if err := backend.PostComment(ctx, prInfo, reviewSummary); err != nil {
-			fmt.Fprintf(cmd.OutOrStdout(), "Warning: failed to post summary comment: %v\n", err)
-		}
-
 		fmt.Fprintf(cmd.OutOrStdout(), "Posted %d comments to PR #%s\n", posted, prInfo.ID)
 		return nil
 	},
@@ -229,46 +235,6 @@ func postReviewComments(ctx context.Context, w io.Writer, backend provider.PRBac
 		posted++
 	}
 	return posted, nil
-}
-
-// buildReviewSummary creates a markdown summary of the review.
-func buildReviewSummary(comments []reviewComment, selected []int) string {
-	var errors, warnings, nitpicks, other int
-	for _, idx := range selected {
-		switch strings.ToLower(comments[idx].Severity) {
-		case "error", "critical":
-			errors++
-		case "warning":
-			warnings++
-		case "nitpick", "nit", "info":
-			nitpicks++
-		default:
-			other++
-		}
-	}
-
-	var sb strings.Builder
-	sb.WriteString("## otto review summary\n\n")
-	sb.WriteString(fmt.Sprintf("Posted **%d** comments", len(selected)))
-	if len(comments) != len(selected) {
-		sb.WriteString(fmt.Sprintf(" (of %d found)", len(comments)))
-	}
-	sb.WriteString(":\n\n")
-
-	if errors > 0 {
-		sb.WriteString(fmt.Sprintf("- **Errors**: %d\n", errors))
-	}
-	if warnings > 0 {
-		sb.WriteString(fmt.Sprintf("- **Warnings**: %d\n", warnings))
-	}
-	if nitpicks > 0 {
-		sb.WriteString(fmt.Sprintf("- **Nitpicks**: %d\n", nitpicks))
-	}
-	if other > 0 {
-		sb.WriteString(fmt.Sprintf("- **Other**: %d\n", other))
-	}
-
-	return sb.String()
 }
 
 // truncateStr truncates a string to maxLen, appending "..." if truncated.

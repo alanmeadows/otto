@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -356,7 +357,9 @@ func executeWithRetry(
 }
 
 // reviewPhase runs the phase review gate using the secondary model.
-// The secondary model reviews all uncommitted changes and fixes issues directly.
+// Step 1: The secondary model produces a markdown review report (no file changes).
+// Step 2: If issues were found, the primary model reads the report and applies fixes.
+// The review report is persisted to history/phase-N-review.md for traceability.
 func reviewPhase(
 	ctx context.Context,
 	client opencode.LLMClient,
@@ -381,9 +384,6 @@ func reviewPhase(
 		return
 	}
 
-	// Snapshot before review to detect changes made by the secondary model.
-	diffBefore := diff
-
 	phaseSummaries := readPhaseSummaries(spec)
 
 	data := map[string]string{
@@ -397,38 +397,101 @@ func reviewPhase(
 		return
 	}
 
-	slog.Info("running phase review gate", "phase", phaseNum)
+	// --- Step 1: Secondary model produces a review report (no file changes) ---
+	slog.Info("running phase review gate (secondary → report)", "phase", phaseNum)
 
-	session, err := client.CreateSession(ctx, fmt.Sprintf("phase-%d-review", phaseNum), repoDir)
+	reviewSession, err := client.CreateSession(ctx, fmt.Sprintf("phase-%d-review", phaseNum), repoDir)
 	if err != nil {
 		slog.Warn("failed to create review session", "phase", phaseNum, "error", err)
 		return
 	}
 
 	secondaryModel := opencode.ParseModelRef(cfg.Models.Secondary)
-	_, err = client.SendPrompt(ctx, session.ID, reviewPrompt, secondaryModel, repoDir)
+	resp, err := client.SendPrompt(ctx, reviewSession.ID, reviewPrompt+opencode.NoToolsInstruction, secondaryModel, repoDir)
 	if err != nil {
 		slog.Warn("phase review failed", "phase", phaseNum, "error", err)
+		_ = client.DeleteSession(ctx, reviewSession.ID, repoDir)
+		return
 	}
 
-	if err := client.DeleteSession(ctx, session.ID, repoDir); err != nil {
-		slog.Warn("failed to delete review session", "error", err)
+	_ = client.DeleteSession(ctx, reviewSession.ID, repoDir)
+
+	reviewReport := ""
+	if resp != nil {
+		reviewReport = resp.Content
 	}
 
-	// Report whether the secondary model made any fixes.
-	diffAfter, _ := gitDiff(repoDir)
-	if diffAfter != diffBefore {
-		// Count affected files from the delta.
-		changedFiles := countDiffFiles(diffAfter) - countDiffFiles(diffBefore)
+	// Defensive check: ensure the secondary model did not modify the repo.
+	diffAfterReview, _ := gitDiff(repoDir)
+	if diffAfterReview != diff {
+		slog.Warn("secondary model unexpectedly modified files during review — reverting", "phase", phaseNum)
+		// Revert any unexpected changes by restoring the working tree.
+		revertCmd := exec.CommandContext(ctx, "git", "checkout", "--", ".")
+		revertCmd.Dir = repoDir
+		_ = revertCmd.Run()
+	}
+
+	// Persist the review report for traceability.
+	reviewPath := filepath.Join(spec.HistoryDir, fmt.Sprintf("phase-%d-review.md", phaseNum))
+	if err := store.WriteBody(reviewPath, reviewReport); err != nil {
+		slog.Warn("failed to write phase review report", "phase", phaseNum, "error", err)
+	}
+
+	// Parse the structured issue count from the report.
+	issueCount := parseIssueCount(reviewReport)
+
+	// Check if the review found issues.
+	if strings.TrimSpace(reviewReport) == "" || issueCount == 0 || strings.Contains(strings.ToUpper(reviewReport), "NO ISSUES FOUND") {
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: no issues found\n")
+		return
+	}
+
+	// --- Step 2: Primary model addresses the review feedback ---
+	fmt.Fprintf(os.Stderr, "  → Phase review: secondary model found %d item(s) to address\n", issueCount)
+	slog.Info("phase review found issues, dispatching primary model to fix", "phase", phaseNum, "issues", issueCount)
+
+	fixData := map[string]string{
+		"review_report":       reviewReport,
+		"uncommitted_changes": diff,
+		"phase_summaries":     phaseSummaries,
+	}
+
+	fixPrompt, err := prompts.Execute("phase-review-fix.md", fixData)
+	if err != nil {
+		slog.Warn("failed to render phase-review-fix template", "error", err)
+		return
+	}
+
+	// Snapshot before fix to detect changes made by the primary model.
+	diffBeforeFix := diff
+
+	fixSession, err := client.CreateSession(ctx, fmt.Sprintf("phase-%d-review-fix", phaseNum), repoDir)
+	if err != nil {
+		slog.Warn("failed to create review fix session", "phase", phaseNum, "error", err)
+		return
+	}
+
+	primaryModel := opencode.ParseModelRef(cfg.Models.Primary)
+	_, err = client.SendPrompt(ctx, fixSession.ID, fixPrompt, primaryModel, repoDir)
+	if err != nil {
+		slog.Warn("primary model fix failed", "phase", phaseNum, "error", err)
+	}
+
+	_ = client.DeleteSession(ctx, fixSession.ID, repoDir)
+
+	// Report whether the primary model applied any fixes.
+	diffAfterFix, _ := gitDiff(repoDir)
+	if diffAfterFix != diffBeforeFix {
+		changedFiles := countDiffFiles(diffAfterFix) - countDiffFiles(diffBeforeFix)
 		if changedFiles < 0 {
 			changedFiles = -changedFiles
 		}
 		if changedFiles == 0 {
-			changedFiles = 1 // at least something changed
+			changedFiles = 1
 		}
-		fmt.Fprintf(os.Stderr, "  ✓ Phase review: secondary model applied fixes (≈%d file(s) touched)\n", changedFiles)
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: primary model applied fixes from review (≈%d file(s) touched)\n", changedFiles)
 	} else {
-		fmt.Fprintf(os.Stderr, "  ✓ Phase review: no fixes needed\n")
+		fmt.Fprintf(os.Stderr, "  ✓ Phase review: review issues noted but no code changes applied\n")
 	}
 }
 
@@ -993,4 +1056,29 @@ func countDiffFiles(diff string) int {
 		}
 	}
 	return count
+}
+
+// issueCountRe matches the structured summary line: **Issues: <number>**
+var issueCountRe = regexp.MustCompile(`(?i)\*\*\s*Issues\s*:\s*(\d+)\s*\*\*`)
+
+// parseIssueCount extracts the issue count from the structured summary footer.
+// Returns the parsed count, or -1 if the line is missing (so callers can
+// distinguish "LLM didn't include the line" from "0 issues").
+func parseIssueCount(report string) int {
+	matches := issueCountRe.FindStringSubmatch(report)
+	if len(matches) < 2 {
+		// Fallback: count the H3 issue headings (### file:line — title).
+		headingCount := 0
+		for _, line := range strings.Split(report, "\n") {
+			if strings.HasPrefix(strings.TrimSpace(line), "### ") {
+				headingCount++
+			}
+		}
+		return headingCount
+	}
+	n, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return -1
+	}
+	return n
 }

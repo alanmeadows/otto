@@ -80,7 +80,11 @@ func generateRequirements(
 	return result, stats, nil
 }
 
-// SpecAdd creates a new spec from a prompt and generates initial requirements.
+// SpecAdd creates a new spec from a prompt.
+// It generates an LLM-derived slug, creates the spec directory, and writes a
+// seed requirements.md containing the user's goal. This is intentionally fast
+// — no codebase analysis or review pipeline runs here. Run 'otto spec
+// requirements' next to expand the seed into full AI-generated requirements.
 func SpecAdd(
 	ctx context.Context,
 	client opencode.LLMClient,
@@ -88,7 +92,7 @@ func SpecAdd(
 	repoDir string,
 	prompt string,
 ) (*Spec, error) {
-	slug := GenerateSlug(prompt)
+	slug := GenerateSlugWithLLM(ctx, client, cfg, repoDir, prompt)
 	slog.Info("creating spec", "slug", slug)
 
 	// Check for duplicate slug — but allow re-running if the spec directory
@@ -108,33 +112,12 @@ func SpecAdd(
 
 	spec := populatePaths(slug, repoDir)
 
-	summary, err := AnalyzeCodebase(repoDir)
-	if err != nil {
-		return nil, fmt.Errorf("analyzing codebase: %w", err)
+	// Write a minimal seed requirements.md with just the user's goal.
+	// 'otto spec requirements' will expand this into full requirements.
+	seed := fmt.Sprintf("# Goal\n\n%s\n", prompt)
+	if err := store.WriteBody(spec.RequirementsPath, seed); err != nil {
+		return nil, fmt.Errorf("writing seed requirements: %w", err)
 	}
-
-	pipeline := buildReviewPipeline(client, repoDir, cfg)
-
-	// For initial creation, use the prompt as the requirements content seed.
-	result, stats, err := generateRequirements(ctx, client, pipeline, &spec, prompt, prompt, summary.String())
-	if err != nil {
-		return nil, fmt.Errorf("generating requirements: %w", err)
-	}
-
-	printReviewStats("Requirements", stats)
-
-	// Split questions from requirements output before writing.
-	reqContent, _ := SplitQuestions(result)
-
-	if err := store.WriteBody(spec.RequirementsPath, reqContent); err != nil {
-		return nil, fmt.Errorf("writing requirements: %w", err)
-	}
-
-	// Extract questions from LLM output
-	ExtractAndAppendQuestions(result, &spec)
-
-	// Auto-resolve any new questions.
-	ResolveAndReport(ctx, client, cfg, repoDir, &spec, "requirements")
 
 	slog.Info("spec created", "slug", slug, "path", spec.Dir)
 	return &spec, nil

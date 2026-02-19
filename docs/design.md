@@ -16,7 +16,7 @@ Otto is a Go-based CLI tool with an optional long-running server (daemon). It or
 - Delegate all reasoning, evaluation, and content generation to LLMs — otto is the orchestrator, not the brain
 - Keep otto's own code simple: sequencing, state management, file I/O, and process lifecycle — not domain logic
 - Implement a full specification pipeline: requirements → research → design → tasks → execution
-- Apply multi-model critical review (primary/secondary/tertiary) to all LLM-generated artifacts
+- Apply multi-model critical review (primary/secondary) to all LLM-generated artifacts
 - Track and manage pull requests across extendable backends (ADO primary, GitHub planned)
 - Automatically detect and fix pipeline failures, then re-push
 - Execute task plans reliably with an outer non-LLM protective loop, parallelism, and isolated sessions
@@ -243,8 +243,7 @@ Example — user config sets all models; repo config overrides only the primary 
 {
   "models": {
     "primary": "github-copilot/claude-opus-4.6",
-    "secondary": "github-copilot/gpt-5.2-codex",
-    "tertiary": "github-copilot/gemini-3-pro"
+    "secondary": "github-copilot/gpt-5.2-codex"
   }
 }
 
@@ -259,8 +258,7 @@ Example — user config sets all models; repo config overrides only the primary 
 {
   "models": {
     "primary": "github-copilot/claude-opus-4.6",  // From repo
-    "secondary": "github-copilot/gpt-5.2-codex",                          // From user
-    "tertiary": "github-copilot/gemini-3-pro-preview"                // From user
+    "secondary": "github-copilot/gpt-5.2-codex"                           // From user
   }
 }
 ```
@@ -276,8 +274,7 @@ Arrays are **replaced**, not merged — e.g., if repo config defines `repos`, it
   // Models are specified in OpenCode provider/model format.
   "models": {
     "primary": "github-copilot/claude-opus-4.6",   // Main workhorse
-    "secondary": "github-copilot/gpt-5.2-codex",                          // Critical reviewer (required)
-    "tertiary": "github-copilot/gemini-3-pro-preview"                // Optional third reviewer
+    "secondary": "github-copilot/gpt-5.2-codex"                           // Critical reviewer (required)
   },
 
   // --- OpenCode ---
@@ -575,14 +572,11 @@ A core requirement: almost all LLM-generated artifacts pass through a multi-mode
 │     "Critically review this artifact. Identify gaps,    │
 │      errors, inconsistencies, missing considerations."  │
 │                                                         │
-│  3. (Optional) Tertiary model (clean session) reviews:  │
-│     Same critical review prompt, fresh perspective      │
-│                                                         │
-│  4. Primary model (new session) incorporates all        │
+│  3. Primary model (new session) incorporates all        │
 │     critical feedback and produces final version        │
 │                                                         │
-│  5. If pass 4 differs substantially from pass 1,       │
-│     optionally repeat steps 2-4 (max 2 cycles)         │
+│  4. If pass 3 differs substantially from pass 1,       │
+│     optionally repeat steps 2-3 (max 2 cycles)         │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -593,7 +587,6 @@ type ReviewPipeline struct {
     client    *opencode.Client
     primary   ModelRef   // e.g. github-copilot/claude-opus-4.6
     secondary ModelRef   // e.g. github-copilot/gpt-5.2-codex
-    tertiary  *ModelRef  // optional
 }
 
 // Review runs the multi-model pipeline, returns the final artifact
@@ -602,16 +595,10 @@ func (p *ReviewPipeline) Review(ctx context.Context, prompt string, contextFiles
     initial := p.generate(ctx, p.primary, prompt, contextFiles)
 
     // Pass 2: Secondary critiques (clean session)
-    critique1 := p.critique(ctx, p.secondary, initial)
+    critique := p.critique(ctx, p.secondary, initial)
 
-    // Pass 3: Optional tertiary critique (clean session)
-    var critique2 string
-    if p.tertiary != nil {
-        critique2 = p.critique(ctx, *p.tertiary, initial)
-    }
-
-    // Pass 4: Primary incorporates feedback (clean session)
-    final := p.refine(ctx, p.primary, initial, critique1, critique2)
+    // Pass 3: Primary incorporates feedback (clean session)
+    final := p.refine(ctx, p.primary, initial, critique)
 
     return final, nil
 }
@@ -630,7 +617,7 @@ Each step uses a **fresh OpenCode session** — directory-scoped to the target w
 | `otto spec execute` | Each phase's uncommitted work (inter-phase review gate) |
 | `otto spec execute` | External assumption validation & repair (primary model, per-phase, after review gate) |
 | `otto spec execute` | Domain hardening & polishing (primary model, per-phase, after external assumptions) |
-| `otto spec execute` | Documentation alignment (primary model with secondary/tertiary review, end of all phases) |
+| `otto spec execute` | Documentation alignment (primary model with secondary review, end of all phases) |
 | `otto pr fix` | Each fix attempt prompt and result |
 
 ### Where it is NOT Applied
@@ -840,7 +827,6 @@ Presents open questions to the user, but first attempts to auto-resolve as many 
 2. For each unanswered question, create an LLM session that attempts to research and answer it — using the full spec context, the codebase, and web research tools
 3. For each question the primary model was able to answer:
    - Secondary model (clean session) validates: "Is this answer correct, complete, and well-supported? Or does this genuinely need human input?"
-   - (Optional) Tertiary model validates independently
    - If reviewers agree the answer is solid → auto-answer the question in questions.md with `status: auto-answered` and the source reasoning
    - If any reviewer disagrees → keep the question for the user
 4. Present remaining unanswered questions to the user one at a time
@@ -868,7 +854,7 @@ questions.md format:
 - **status**: auto-answered
 - **question**: Should auth errors return 401 with a JSON body or just a status code?
 - **answer**: Return 401 with a JSON body containing an `error` field and `message` field, consistent with existing API error responses in handlers.go.
-- **validated_by**: secondary, tertiary
+- **validated_by**: secondary
 ```
 
 #### `otto spec run [--spec <slug>] <prompt>`
@@ -894,7 +880,7 @@ No multi-model review is applied — the user drives this interaction directly.
 2. **Each task runs in an isolated OpenCode session** — clean context, no bleed between tasks
 3. **Task briefing** — before executing each task, a preparatory LLM call reads all spec artifacts (requirements, research, design, tasks) and distills a focused implementation brief specific to that task. This replaces the naive approach of dumping all context documents into every task prompt. The executor receives a crisp, task-relevant brief plus pointers to the raw spec files so it can explore further if needed. Briefing is enabled by default (`spec.task_briefing: true`) and gracefully falls back to the static context dump if the briefing call fails.
 4. **Parallel execution** — tasks in the same phase (`parallel_group`) run concurrently, bounded by `spec.max_parallel_tasks`
-5. **Phase review gate** — after all tasks in a phase complete, secondary/tertiary models review all uncommitted changes, primary incorporates feedback, then the phase is committed
+5. **Phase review gate** — after all tasks in a phase complete, the secondary model produces a review report (no file changes), then the primary model reads the report and applies fixes before the phase is committed
 6. **Post-review hardening** — after the phase review gate, two additional primary-model passes run sequentially: (a) External Assumption Validator & Repair — finds and fixes invalid, fragile, or unverifiable assumptions about external systems; (b) Domain Hardening & Polishing — improves resilience, clarity, and operability. Both modify the working tree directly.
 7. **Clean phase boundaries** — each phase starts from a committed state, so the next phase builds on reviewed work
 8. **Status persistence** — task status is written to tasks.md after each task completes, providing crash recovery
@@ -903,7 +889,7 @@ No multi-model review is applied — the user drives this interaction directly.
 11. **Summary chaining** — each phase's commit summary is fed into the next phase's task prompts as context, so the LLM knows what changed
 12. **Task retry on failure** — a failed task is retried until it succeeds, up to `spec.max_task_retries` (default 15). Tasks should never permanently block progress. On each retry, a fresh OpenCode session is created with the task description, the error/output from the previous attempt, and additional instruction to correct the failure. Only after exhausting all retries is a task marked `failed` — and even then the outer loop continues to the next phase if possible.
 13. **Parallel task conflict acceptance** — multiple tasks in the same phase may run concurrently in the same worktree. This means file conflicts, merge issues, or stale reads are possible. Otto accepts this: some error rate is tolerable and will be caught by the phase review gate or by task retries. The system is eventually consistent. This is a pragmatic tradeoff — perfect isolation (separate worktrees per task) would add enormous complexity for marginal benefit.
-14. **Documentation alignment** — after all phases complete, a final documentation alignment pass ensures all docs in the repo accurately reflect the current behavior of the branch. This uses the primary model with secondary/tertiary review, and only modifies documentation — never runtime behavior.
+14. **Documentation alignment** — after all phases complete, a final documentation alignment pass ensures all docs in the repo accurately reflect the current behavior of the branch. This uses the primary model with secondary review, and only modifies documentation — never runtime behavior.
 
 ### Execution Flow
 
@@ -951,15 +937,13 @@ otto spec execute [--spec <slug>]
 │                                                         │
 │  ── Phase Review Gate ──────────────────────────────────│
 │                                                         │
-│  7. Multi-model review of the phase's work:             │
-│     a. Secondary model (clean session):                 │
-│        "Review all uncommitted changes. Identify bugs,  │
-│         missed edge cases, inconsistencies, incomplete  │
-│         implementations."                               │
-│     b. (Optional) Tertiary model (clean session):       │
-│        Same review, fresh perspective                   │
-│     c. Primary model (clean session):                   │
-│        Incorporate all review feedback, fix issues       │
+│  7. Two-step review of the phase's work:                │
+│     a. Secondary model (clean session, no tools):       │
+│        Produces a markdown review report identifying    │
+│        bugs, edge cases, inconsistencies, incomplete    │
+│        implementations. Does NOT modify files.          │
+│     b. Primary model (clean session, tools enabled):    │
+│        Reads the review report and applies fixes        │
 │                                                         │
 │  ── Post-Review Hardening (Primary Model) ──────────── │
 │                                                         │
@@ -989,8 +973,7 @@ otto spec execute [--spec <slug>]
 │         Documentation Alignment — update docs to        │
 │         reflect current branch behavior                 │
 │      b. Secondary model reviews doc changes             │
-│      c. (Optional) Tertiary model reviews               │
-│      d. Primary incorporates feedback, finalizes docs   │
+│      c. Primary incorporates feedback, finalizes docs   │
 │      e. Commit documentation changes                    │
 │         (git add -A && git commit)                      │
 └─────────────────────────────────────────────────────────┘
@@ -998,7 +981,7 @@ otto spec execute [--spec <slug>]
 
 The phase review gate ensures that each batch of parallel work is critically evaluated before being committed. After the review gate, two additional primary-model passes harden the phase's output: the **External Assumption Validator** finds and fixes invalid or fragile assumptions about external systems (APIs, infrastructure, auth, async behavior, rate limits), and the **Domain Hardening** pass improves resilience, error handling, and operability. Both modify the working tree directly before the phase is committed.
 
-After all phases complete, a final **Documentation Alignment** pass ensures all documentation in the repo accurately reflects the current state of the branch. This uses the primary model to update docs, with secondary/tertiary review to validate the changes. Only documentation is modified — never runtime behavior. The documentation changes are committed separately.
+After all phases complete, a final **Documentation Alignment** pass ensures all documentation in the repo accurately reflects the current state of the branch. This uses the primary model to update docs, with secondary review to validate the changes. Only documentation is modified — never runtime behavior. The documentation changes are committed separately.
 
 ### Concurrent Access to tasks.md
 

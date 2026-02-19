@@ -96,7 +96,7 @@ Establish the Go module, directory structure, build tooling, and core types that
 ### 0.3 — Define configuration types and schema
 - **status**: pending
 
-- `internal/config/types.go`: Define the Go struct hierarchy matching the JSONC schema in design.md (line 262–340). The structs are: `Config` (top-level), `ModelsConfig` (primary/secondary/tertiary strings), `OpenCodeConfig` (url, auto_start, password, permissions), `PRConfig` (default_provider, max_fix_attempts, providers map), `ADOConfig` (organization, project, pat, auto_complete, merlinbot, create_work_item), `GitHubConfig` (token), `RepoConfig` (name, primary_dir, worktree_dir, git_strategy, branch_template, branch_patterns), `ServerConfig` (poll_interval, port, log_dir), `SpecConfig` (max_parallel_tasks, task_timeout, max_task_retries), `NotificationsConfig` (teams_webhook_url, events)
+- `internal/config/types.go`: Define the Go struct hierarchy matching the JSONC schema in design.md (line 262–340). The structs are: `Config` (top-level), `ModelsConfig` (primary/secondary strings), `OpenCodeConfig` (url, auto_start, password, permissions), `PRConfig` (default_provider, max_fix_attempts, providers map), `ADOConfig` (organization, project, pat, auto_complete, merlinbot, create_work_item), `GitHubConfig` (token), `RepoConfig` (name, primary_dir, worktree_dir, git_strategy, branch_template, branch_patterns), `ServerConfig` (poll_interval, port, log_dir), `SpecConfig` (max_parallel_tasks, task_timeout, max_task_retries), `NotificationsConfig` (teams_webhook_url, events)
 - `NotificationsConfig` struct: `TeamsWebhookURL string`, `Events []string` — define now even though implementation is Phase 9, to avoid retrofitting the struct hierarchy later
 - Include `git_strategy` enum type (`worktree`, `branch`, `hands-off`)
 - Include `branch_template` as string (parsed via `text/template` at runtime)
@@ -228,15 +228,14 @@ The foundation for all LLM interactions. Nothing that calls LLMs can work withou
 - **status**: pending
 
 - `internal/opencode/review.go`:
-  - `ReviewPipeline` struct: `client`, `serverMgr`, `primary`, `secondary`, `tertiary *ModelRef`
+  - `ReviewPipeline` struct: `client`, `serverMgr`, `primary`, `secondary`
   - `Review(ctx, directory, prompt, contextData) -> (finalArtifact string, error)`:
     1. Pass 1: primary generates in a fresh session → capture output → delete session
     2. Pass 2: secondary critiques in a fresh session (receives artifact + review.md prompt) → capture critique → delete session
-    3. Pass 3: (if tertiary configured) tertiary critiques in fresh session → capture → delete
-    4. Pass 4: primary incorporates all feedback in fresh session → final artifact → delete session
-  - `maxCycles` config (default 1, max 2): **iteration heuristic — always run exactly `maxCycles` iterations. If iteration support beyond 1 is needed later, use a simple metric: if the Levenshtein distance between pass 1 and pass 4 output exceeds 20% of artifact length, iterate. Alternatively, delegate to LLM: "Did the review feedback result in material changes? Reply YES/NO."**
+    3. Pass 3: primary incorporates all feedback in fresh session → final artifact → delete session
+  - `maxCycles` config (default 1, max 2): **iteration heuristic — always run exactly `maxCycles` iterations. If iteration support beyond 1 is needed later, use a simple metric: if the Levenshtein distance between pass 1 and pass 3 output exceeds 20% of artifact length, iterate. Alternatively, delegate to LLM: "Did the review feedback result in material changes? Reply YES/NO."**
   - Each session is directory-scoped and cleaned up after use
-  - **Unit tests (using mocks from 1.0): mock primary/secondary/tertiary sessions. Verify 4-pass flow. Verify session cleanup (all sessions deleted). Verify iteration control (`maxCycles`). Verify graceful degradation when tertiary is nil.**
+  - **Unit tests (using mocks from 1.0): mock primary/secondary sessions. Verify 3-pass flow. Verify session cleanup (all sessions deleted). Verify iteration control (`maxCycles`).**
 
 ---
 
@@ -609,9 +608,9 @@ This is the most mechanically complex code in the project. Break into sub-tasks:
 
 - Within `execute.go`:
   - After all tasks in a phase complete:
-    1. Secondary model reviews all uncommitted changes in a fresh session (`phase-review.md` template)
-    2. (Optional) tertiary model reviews independently
-    3. Primary model incorporates feedback in a fresh session, applies fixes
+    1. Secondary model produces a markdown review report (no file changes) using `phase-review.md` template with no-tools instruction
+    2. If issues found, primary model reads the report and applies fixes using `phase-review-fix.md` template
+    3. Review report persisted to `history/phase-N-review.md` for traceability
   - All sessions are directory-scoped and deleted after use
 
 ### 4.3 — Implement question harvesting
@@ -662,7 +661,7 @@ This is the most mechanically complex code in the project. Break into sub-tasks:
      - Apply fixes/guards directly to the working tree (timeouts, retries, validation, error handling)
   5. Delete session after completion
   6. Log the issues-fixed count from the LLM output
-- This runs **per phase**, after the secondary/tertiary review gate, before domain hardening
+- This runs **per phase**, after the secondary review gate, before domain hardening
 - Non-blocking: if the session fails, log the error and continue to the next step
 - The LLM modifies files directly — no parsing of output needed beyond logging
 
@@ -688,12 +687,11 @@ This is the most mechanically complex code in the project. Break into sub-tasks:
 
 - Within `execute.go`, after ALL phases complete (after the main phase loop exits):
   1. Read all accumulated phase summaries
-  2. Run the multi-model review pipeline (primary generates, secondary/tertiary review, primary incorporates):
+  2. Run the multi-model review pipeline (primary generates, secondary review, primary incorporates):
      a. Primary model (clean session): render `documentation-alignment.md` prompt template with `{{.phase_summaries}}`
      b. The LLM updates documentation (README, docs/, inline docs, examples, configs) to reflect current branch behavior
      c. Secondary model reviews the documentation changes (clean session)
-     d. (Optional) Tertiary model reviews independently
-     e. Primary model incorporates review feedback (clean session)
+     d. Primary model incorporates review feedback (clean session)
   3. If changes were made, commit with message: `otto: documentation alignment`
   4. All sessions deleted after use
 - This is a **documentation-only** phase — the LLM must NOT change runtime behavior
@@ -1138,7 +1136,7 @@ This task list incorporates the following feedback from a comprehensive review:
 - 3.3.11–3.3.13: Prompt template validation for `external-assumptions.md`, `domain-hardening.md`, `documentation-alignment.md`
 - 4.6: External Assumption Validator & Repair step — per-phase, primary model, after review gate
 - 4.7: Domain Hardening & Polishing step — per-phase, primary model, after external assumptions
-- 4.8: Documentation Alignment phase — end of all phases, primary model with secondary/tertiary review
+- 4.8: Documentation Alignment phase — end of all phases, primary model with secondary review
 - 4.9: Wire new prompt templates into execution flow
 - Updated design.md execution flow diagram, template tables, and module structure to reflect new phases
 

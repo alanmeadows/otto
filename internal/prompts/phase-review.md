@@ -21,6 +21,14 @@ The following phases have already been completed and committed. Use this context
 {{.phase_summaries}}
 {{end}}
 
+## Uncommitted Changes
+
+The following diff represents all uncommitted changes in the working directory. Review these changes carefully.
+
+```diff
+{{.uncommitted_changes}}
+```
+
 ## What NOT To Do
 
 - Do not refactor working code for style preferences

@@ -1,4 +1,4 @@
-package opencode
+package llm
 
 import (
 	"context"
@@ -14,7 +14,7 @@ const maxJSONRetries = 2
 // ParseJSONResponse attempts to parse a JSON response from LLM output.
 // If the raw response is not valid JSON, it tries to extract JSON and
 // optionally retries via the same session.
-func ParseJSONResponse[T any](ctx context.Context, client LLMClient, sessionID string, directory string, model ModelRef, rawResponse string) (T, error) {
+func ParseJSONResponse[T any](ctx context.Context, client Client, sessionID string, rawResponse string) (T, error) {
 	var zero T
 
 	// Try direct unmarshal
@@ -35,8 +35,7 @@ func ParseJSONResponse[T any](ctx context.Context, client LLMClient, sessionID s
 			slog.Debug("retrying JSON parse via session", "attempt", i+1, "session", sessionID)
 
 			resp, err := client.SendPrompt(ctx, sessionID,
-				"Your previous response was not valid JSON. Please return ONLY the JSON array/object as specified, with no other text, no markdown fences, no explanation.",
-				model, directory)
+				"Your previous response was not valid JSON. Please return ONLY the JSON array/object as specified, with no other text, no markdown fences, no explanation.")
 			if err != nil {
 				continue
 			}

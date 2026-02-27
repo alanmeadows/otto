@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
-	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/llm"
 	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/provider"
 	"github.com/alanmeadows/otto/internal/provider/ado"
@@ -266,7 +266,7 @@ func InferPR() (*PRDocument, error) {
 // FixPR attempts to fix a failing PR using a two-phase LLM approach.
 // Phase 1: Analyze build logs to produce a structured diagnosis.
 // Phase 2: Apply fixes based on the diagnosis.
-func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) (retErr error) {
+func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, client llm.Client, cfg *config.Config) (retErr error) {
 	// Guard the entire fix operation with a 15-minute deadline so a stuck LLM
 	// session cannot block the monitoring loop indefinitely.
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
@@ -290,19 +290,13 @@ func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serv
 		}
 	}()
 
-	// Map PR to local worktree.
-	workDir, cleanup, err := repo.MapPRToWorkDir(cfg, pr.URL, pr.Branch)
+	// Create a clean temporary worktree for the fix.
+	// This prevents pre-existing dirty state from leaking into commits.
+	workDir, mergeBack, cleanup, err := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
 	if err != nil {
-		return fmt.Errorf("mapping PR to workdir: %w", err)
+		return fmt.Errorf("mapping PR to clean workdir: %w", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	llm := serverMgr.LLM()
-	if llm == nil {
-		return fmt.Errorf("OpenCode server not available")
-	}
+	defer cleanup()
 
 	// Get pipeline status to find failed builds.
 	prInfo := &provider.PRInfo{
@@ -341,15 +335,13 @@ func FixPR(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serv
 		return fmt.Errorf("no failed build logs found to analyze")
 	}
 
-	model := opencode.ParseModelRef(cfg.Models.Primary)
-
 	// Phase 1: Analyze logs.
 	slog.Info("PR fix Phase 1: analyzing build logs", "prID", pr.ID)
-	analysisSession, err := llm.CreateSession(ctx, fmt.Sprintf("PR Fix Analysis #%s", pr.ID), workDir)
+	analysisSession, err := client.CreateSession(ctx, fmt.Sprintf("PR Fix Analysis #%s", pr.ID), workDir)
 	if err != nil {
 		return fmt.Errorf("creating analysis session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, analysisSession.ID, workDir)
+	defer client.DeleteSession(ctx, analysisSession.ID)
 
 	analysisPrompt := fmt.Sprintf(`You are analyzing CI/CD build failure logs for PR #%s: "%s".
 
@@ -391,7 +383,7 @@ Then provide a structured failure summary:
 
 Provide a concise, structured diagnosis that another LLM can use to fix the code (if CODE) or that explains the infra issue (if INFRASTRUCTURE). Focus on actionable information only.`, pr.ID, pr.Title, logSummary.String())
 
-	analysisResp, err := llm.SendPrompt(ctx, analysisSession.ID, analysisPrompt, model, workDir)
+	analysisResp, err := client.SendPrompt(ctx, analysisSession.ID, analysisPrompt)
 	if err != nil {
 		return fmt.Errorf("Phase 1 analysis failed: %w", err)
 	}
@@ -430,11 +422,11 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 
 	// Phase 2: Fix code.
 	slog.Info("PR fix Phase 2: applying fixes", "prID", pr.ID)
-	fixSession, err := llm.CreateSession(ctx, fmt.Sprintf("PR Fix #%s attempt %d", pr.ID, pr.FixAttempts+1), workDir)
+	fixSession, err := client.CreateSession(ctx, fmt.Sprintf("PR Fix #%s attempt %d", pr.ID, pr.FixAttempts+1), workDir)
 	if err != nil {
 		return fmt.Errorf("creating fix session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, fixSession.ID, workDir)
+	defer client.DeleteSession(ctx, fixSession.ID)
 
 	fixPrompt := fmt.Sprintf(`You are fixing CI/CD failures for PR #%s: "%s".
 
@@ -449,7 +441,7 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 3. Do NOT introduce unnecessary changes — fix only what's broken
 4. Make sure your fixes are correct and complete`, pr.ID, pr.Title, diagnosis)
 
-	_, err = llm.SendPrompt(ctx, fixSession.ID, fixPrompt, model, workDir)
+	_, err = client.SendPrompt(ctx, fixSession.ID, fixPrompt)
 	if err != nil {
 		return fmt.Errorf("Phase 2 fix failed: %w", err)
 	}
@@ -462,6 +454,11 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 	}
 
 	slog.Info("PR fix committed and pushed", "prID", pr.ID, "commit", commitHash)
+
+	// Merge pushed changes back to the user's local worktree (best effort).
+	if err := mergeBack(); err != nil {
+		slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", err)
+	}
 
 	// Update PR document.
 	pr.FixAttempts++
@@ -495,7 +492,7 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 // ResolveConflicts attempts to rebase the PR's source branch onto the target
 // branch to resolve merge conflicts. If the rebase encounters conflicts that
 // git cannot auto-resolve, it uses the LLM to manually resolve them.
-func ResolveConflicts(ctx context.Context, pr *PRDocument, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+func ResolveConflicts(ctx context.Context, pr *PRDocument, backend provider.PRBackend, client llm.Client, cfg *config.Config) error {
 	// Guard with a 10-minute deadline so a stuck LLM session cannot block indefinitely.
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 	defer cancel()
@@ -558,15 +555,6 @@ func ResolveConflicts(ctx context.Context, pr *PRDocument, backend provider.PRBa
 	// Rebase failed — there are conflicts git couldn't auto-resolve.
 	slog.Warn("rebase has conflicts, using LLM to resolve", "prID", pr.ID, "output", string(rebaseOut))
 
-	llm := serverMgr.LLM()
-	if llm == nil {
-		// Abort the rebase so the worktree is left clean.
-		abortCmd := exec.CommandContext(ctx, "git", "rebase", "--abort")
-		abortCmd.Dir = workDir
-		_ = abortCmd.Run()
-		return fmt.Errorf("OpenCode server not available for conflict resolution")
-	}
-
 	// Get the list of conflicted files.
 	diffCmd := exec.CommandContext(ctx, "git", "diff", "--name-only", "--diff-filter=U")
 	diffCmd.Dir = workDir
@@ -587,16 +575,14 @@ func ResolveConflicts(ctx context.Context, pr *PRDocument, backend provider.PRBa
 		return fmt.Errorf("rebase failed but no conflicted files found")
 	}
 
-	model := opencode.ParseModelRef(cfg.Models.Primary)
-
-	resolveSession, err := llm.CreateSession(ctx, fmt.Sprintf("Conflict Resolution #%s", pr.ID), workDir)
+	resolveSession, err := client.CreateSession(ctx, fmt.Sprintf("Conflict Resolution #%s", pr.ID), workDir)
 	if err != nil {
 		abortCmd := exec.CommandContext(ctx, "git", "rebase", "--abort")
 		abortCmd.Dir = workDir
 		_ = abortCmd.Run()
 		return fmt.Errorf("creating conflict resolution session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, resolveSession.ID, workDir)
+	defer client.DeleteSession(ctx, resolveSession.ID)
 
 	resolvePrompt := fmt.Sprintf(`You are resolving git merge conflicts for PR #%s: "%s".
 
@@ -629,7 +615,7 @@ These are the commits on this branch — they represent the intent and purpose o
 
 Do NOT introduce unnecessary changes beyond resolving the conflicts.`, pr.ID, pr.Title, pr.Branch, targetRef, branchContext, branchDiffStat, conflictedFiles)
 
-	_, err = llm.SendPrompt(ctx, resolveSession.ID, resolvePrompt, model, workDir)
+	_, err = client.SendPrompt(ctx, resolveSession.ID, resolvePrompt)
 	if err != nil {
 		abortCmd := exec.CommandContext(ctx, "git", "rebase", "--abort")
 		abortCmd.Dir = workDir
@@ -730,7 +716,7 @@ func gitCommitAndPush(ctx context.Context, workDir, branch, message string) (str
 
 // RunMonitorLoop runs the PR monitoring loop that polls for PR status changes.
 // It blocks until the context is cancelled.
-func RunMonitorLoop(ctx context.Context, cfg *config.Config, serverMgr *opencode.ServerManager) error {
+func RunMonitorLoop(ctx context.Context, cfg *config.Config, client llm.Client) error {
 	pollInterval := cfg.Server.ParsePollInterval()
 	slog.Info("starting PR monitoring loop", "interval", pollInterval)
 
@@ -741,7 +727,7 @@ func RunMonitorLoop(ctx context.Context, cfg *config.Config, serverMgr *opencode
 	resetStuckPRs()
 
 	// Run immediately on startup, then on ticker.
-	pollAllPRs(ctx, reg, serverMgr, cfg)
+	pollAllPRs(ctx, reg, client, cfg)
 
 	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
@@ -752,10 +738,10 @@ func RunMonitorLoop(ctx context.Context, cfg *config.Config, serverMgr *opencode
 			slog.Info("monitoring loop stopped")
 			return nil
 		case <-ticker.C:
-			pollAllPRs(ctx, reg, serverMgr, cfg)
+			pollAllPRs(ctx, reg, client, cfg)
 		case <-pollTrigger:
 			slog.Info("immediate poll triggered")
-			pollAllPRs(ctx, reg, serverMgr, cfg)
+			pollAllPRs(ctx, reg, client, cfg)
 			// Reset ticker so we don't poll again too soon.
 			ticker.Reset(pollInterval)
 		}
@@ -829,7 +815,7 @@ func buildMonitorRegistry(cfg *config.Config) *provider.Registry {
 }
 
 // pollAllPRs processes all tracked PRs in a single poll cycle.
-func pollAllPRs(ctx context.Context, reg *provider.Registry, serverMgr *opencode.ServerManager, cfg *config.Config) {
+func pollAllPRs(ctx context.Context, reg *provider.Registry, client llm.Client, cfg *config.Config) {
 	prs, err := ListPRs()
 	if err != nil {
 		slog.Error("failed to list PRs", "error", err)
@@ -853,7 +839,7 @@ func pollAllPRs(ctx context.Context, reg *provider.Registry, serverMgr *opencode
 		watchCount++
 
 		slog.Info("polling PR", "prID", pr.ID, "title", pr.Title, "status", pr.Status, "waitingOn", pr.ComputeWaitingOn())
-		if err := pollSinglePR(ctx, pr, reg, serverMgr, cfg); err != nil {
+		if err := pollSinglePR(ctx, pr, reg, client, cfg); err != nil {
 			// If auth is broken, skip remaining PRs — they'll all fail the same way.
 			if errors.Is(err, ado.ErrAuthExpired) {
 				slog.Error("authentication expired, skipping remaining PRs — run 'az login' to refresh", "prID", pr.ID)
@@ -871,7 +857,7 @@ func pollAllPRs(ctx context.Context, reg *provider.Registry, serverMgr *opencode
 }
 
 // pollSinglePR handles a single PR check in the monitoring loop.
-func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, client llm.Client, cfg *config.Config) error {
 	// Short-circuit if context is already cancelled (server shutting down).
 	if ctx.Err() != nil {
 		return ctx.Err()
@@ -925,7 +911,7 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 				if err := SavePR(pr); err != nil {
 					slog.Error("failed to save conflict state", "prID", pr.ID, "error", err)
 				}
-				if err := ResolveConflicts(ctx, pr, backend, serverMgr, cfg); err != nil {
+				if err := ResolveConflicts(ctx, pr, backend, client, cfg); err != nil {
 					slog.Error("failed to resolve merge conflicts", "prID", pr.ID, "error", err)
 				}
 			} else {
@@ -971,7 +957,7 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 			pr.Status = "watching"
 			slog.Info("pipeline failed, attempting fix", "prID", pr.ID)
 			if pr.FixAttempts < pr.MaxFixAttempts {
-				if fixErr := FixPR(ctx, pr, backend, serverMgr, cfg); fixErr != nil {
+				if fixErr := FixPR(ctx, pr, backend, client, cfg); fixErr != nil {
 					slog.Error("fix attempt failed", "prID", pr.ID, "error", fixErr)
 				}
 			} else {
@@ -1022,7 +1008,7 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 			}
 
 			slog.Info("processing new comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
-			if err := evaluateComment(ctx, pr, comment, backend, serverMgr, cfg); err != nil {
+			if err := evaluateComment(ctx, pr, comment, backend, client, cfg); err != nil {
 				slog.Error("failed to evaluate comment", "prID", pr.ID, "commentID", comment.ID, "error", err)
 			}
 			newCommentCount++
@@ -1052,7 +1038,7 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, s
 			pr.MerlinBotDone = true
 			slog.Debug("MerlinBot not configured, marking done", "prID", pr.ID)
 		} else if comments != nil {
-			if err := handleMerlinBotDaemon(ctx, pr, comments, backend, serverMgr, cfg); err != nil {
+			if err := handleMerlinBotDaemon(ctx, pr, comments, backend, client, cfg); err != nil {
 				slog.Warn("MerlinBot handling failed", "prID", pr.ID, "error", err)
 			}
 		}
@@ -1143,7 +1129,7 @@ func parseMerlinBotEvaluation(content string) []merlinBotEvaluation {
 // handleMerlinBotDaemon processes MerlinBot comments on an ADO PR.
 // It detects "no AI feedback", evaluates real feedback via LLM, and resolves threads.
 // Sets pr.MerlinBotDone = true when MerlinBot has been fully handled.
-func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provider.Comment, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config) error {
 	prInfo := &provider.PRInfo{
 		ID:           pr.ID,
 		URL:          pr.URL,
@@ -1205,20 +1191,11 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 	// Evaluate unresolved MerlinBot comments via LLM.
 	slog.Info("evaluating MerlinBot comments via LLM", "prID", pr.ID, "count", len(unresolvedBot))
 
-	workDir, cleanup, err := repo.MapPRToWorkDir(cfg, pr.URL, pr.Branch)
+	workDir, mergeBack, cleanup, err := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
 	if err != nil {
-		return fmt.Errorf("mapping PR to workdir: %w", err)
+		return fmt.Errorf("mapping PR to clean workdir: %w", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	llm := serverMgr.LLM()
-	if llm == nil {
-		return fmt.Errorf("OpenCode server not available")
-	}
-
-	model := opencode.ParseModelRef(cfg.Models.Primary)
+	defer cleanup()
 
 	// Build comment summary for the prompt.
 	var commentSummary strings.Builder
@@ -1234,13 +1211,13 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 		return fmt.Errorf("building MerlinBot evaluation prompt: %w", err)
 	}
 
-	session, err := llm.CreateSession(ctx, fmt.Sprintf("MerlinBot PR#%s", pr.ID), workDir)
+	session, err := client.CreateSession(ctx, fmt.Sprintf("MerlinBot PR#%s", pr.ID), workDir)
 	if err != nil {
 		return fmt.Errorf("creating MerlinBot session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, session.ID, workDir)
+	defer client.DeleteSession(ctx, session.ID)
 
-	resp, err := llm.SendPrompt(ctx, session.ID, prompt, model, workDir)
+	resp, err := client.SendPrompt(ctx, session.ID, prompt)
 	if err != nil {
 		return fmt.Errorf("MerlinBot evaluation failed: %w", err)
 	}
@@ -1255,7 +1232,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 			fixCount++
 			fixPrompt := fmt.Sprintf("Fix the issue identified by MerlinBot in thread %s:\n\n%s\n\nAction: %s",
 				eval.ThreadID, eval.Reason, eval.Action)
-			if _, err := llm.SendPrompt(ctx, session.ID, fixPrompt, model, workDir); err != nil {
+			if _, err := client.SendPrompt(ctx, session.ID, fixPrompt); err != nil {
 				slog.Warn("failed to apply MerlinBot fix", "prID", pr.ID, "threadID", eval.ThreadID, "error", err)
 				continue
 			}
@@ -1292,6 +1269,10 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 			slog.Warn("failed to commit MerlinBot fixes", "prID", pr.ID, "error", err)
 		} else {
 			slog.Info("committed MerlinBot fixes", "prID", pr.ID, "commit", commitHash, "fixCount", fixCount)
+			// Merge pushed changes back to the user's local worktree (best effort).
+			if mbErr := mergeBack(); mbErr != nil {
+				slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", mbErr)
+			}
 		}
 	}
 

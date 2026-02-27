@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
-	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/llm"
 	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/provider"
 	"github.com/alanmeadows/otto/internal/repo"
@@ -25,24 +25,15 @@ type CommentResponse struct {
 
 // evaluateComment processes a new review comment on a tracked PR.
 // It creates an LLM session, evaluates the comment, and takes appropriate action.
-func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comment, backend provider.PRBackend, serverMgr *opencode.ServerManager, cfg *config.Config) error {
+func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config) error {
 	slog.Info("evaluating comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
 
-	// Map PR to local worktree.
-	workDir, cleanup, err := repo.MapPRToWorkDir(cfg, pr.URL, pr.Branch)
+	// Create a clean temporary worktree for the fix.
+	workDir, mergeBack, cleanup, err := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
 	if err != nil {
-		return fmt.Errorf("mapping PR to workdir: %w", err)
+		return fmt.Errorf("mapping PR to clean workdir: %w", err)
 	}
-	if cleanup != nil {
-		defer cleanup()
-	}
-
-	llm := serverMgr.LLM()
-	if llm == nil {
-		return fmt.Errorf("OpenCode server not available")
-	}
-
-	model := opencode.ParseModelRef(cfg.Models.Primary)
+	defer cleanup()
 
 	// Read code context around the commented line.
 	codeContext := readCodeContext(workDir, comment.FilePath, comment.Line, 10)
@@ -64,13 +55,13 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 	}
 
 	// Create session and send prompt.
-	session, err := llm.CreateSession(ctx, fmt.Sprintf("Comment Response PR#%s", pr.ID), workDir)
+	session, err := client.CreateSession(ctx, fmt.Sprintf("Comment Response PR#%s", pr.ID), workDir)
 	if err != nil {
 		return fmt.Errorf("creating session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, session.ID, workDir)
+	defer client.DeleteSession(ctx, session.ID)
 
-	resp, err := llm.SendPrompt(ctx, session.ID, prompt, model, workDir)
+	resp, err := client.SendPrompt(ctx, session.ID, prompt)
 	if err != nil {
 		return fmt.Errorf("sending prompt: %w", err)
 	}
@@ -86,7 +77,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 	}
 
 	// Parse JSON response using the generic ParseJSONResponse.
-	commentResp, err := opencode.ParseJSONResponse[CommentResponse](ctx, llm, session.ID, workDir, model, content)
+	commentResp, err := llm.ParseJSONResponse[CommentResponse](ctx, client, session.ID, content)
 	if err != nil {
 		// Fallback: post the raw response as a reply.
 		slog.Warn("failed to parse comment response JSON, posting raw reply", "error", err)
@@ -112,6 +103,10 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		if err != nil {
 			slog.Warn("no changes to commit for AGREE decision", "error", err)
 		} else {
+			// Merge pushed changes back to the user's local worktree (best effort).
+			if mbErr := mergeBack(); mbErr != nil {
+				slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", mbErr)
+			}
 			// Update the reply with commit hash.
 			if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, fmt.Sprintf("Fixed in %s", commitHash)); err != nil {
 				slog.Warn("failed to reply to comment", "error", err, "threadID", comment.ThreadID)

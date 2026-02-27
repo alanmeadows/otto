@@ -125,12 +125,6 @@ func applyEnvOverrides(cfg *Config) {
 		gh.Token = token
 		cfg.PR.Providers["github"] = gh
 	}
-	if pw := os.Getenv("OPENCODE_SERVER_PASSWORD"); pw != "" {
-		cfg.OpenCode.Password = pw
-	}
-	if user := os.Getenv("OPENCODE_SERVER_USERNAME"); user != "" {
-		cfg.OpenCode.Username = user
-	}
 }
 
 // RepoRoot returns the detected git repository root, or empty string if not in a repo.

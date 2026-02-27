@@ -1,45 +1,45 @@
 # Otto
 
-AI-powered spec-to-code pipeline and PR lifecycle manager.
+AI-powered PR lifecycle manager with a Copilot session dashboard.
 
 ## Overview
 
-Otto is a Go CLI that orchestrates LLM-driven development workflows through [OpenCode](https://opencode.ai). It turns natural-language prompts into structured specifications, breaks them into executable tasks, runs them via an LLM coding agent, and monitors pull requests for review feedback — closing the loop automatically.
+Otto is a Go CLI that orchestrates LLM-driven development workflows through the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). It monitors pull requests for review feedback, automatically fixes build failures, resolves merge conflicts, and responds to code review comments — all powered by LLM coding agents.
+
+Otto also includes a **web-based Copilot session dashboard** for managing multiple Copilot CLI sessions from your browser or phone, with Azure DevTunnel support for remote access.
 
 Otto is an **LLM orchestrator, not a logic engine** — it delegates reasoning and code generation to LLMs and keeps its own code focused on plumbing, sequencing, and state management.
 
 ## Features
 
-- **Spec pipeline** — structured workflow from prompt → requirements → research → design → tasks → execution, with multi-model critical review at every stage
 - **PR monitoring** — daemon polls PRs for review comments, auto-fixes issues via LLM, and re-pushes (up to configurable max attempts)
 - **PR review** — LLM-powered code review with interactive inline comment posting
+- **Copilot dashboard** — web UI for managing Copilot CLI sessions with real-time streaming, session resume, and live activity monitoring
+- **Remote access** — Azure DevTunnel integration to access the dashboard from your phone
+- **Session discovery** — automatically discovers persisted sessions from `~/.copilot/session-state/` with live activity timestamps
+- **Shared server** — optionally connect to an existing headless Copilot server for shared session management
 - **Notifications** — Microsoft Teams webhook notifications for PR events
 - **Multi-provider** — pluggable PR backends for Azure DevOps and GitHub
 - **Repository management** — git worktree and branch strategies for multi-repo workflows
-- **All state on disk** — specs, PRs, and config stored as human-readable markdown/JSONC — no databases
+- **All state on disk** — PRs and config stored as human-readable markdown/JSONC — no databases
 
 ## Installation
 
 ### From Source
 
-Requires **Go 1.25.6+**.
-
-```bash
-go install github.com/alanmeadows/otto/cmd/otto@latest
-```
-
-Or clone and build:
+Requires **Go 1.25.6+** and a [GitHub Copilot subscription](https://github.com/features/copilot).
 
 ```bash
 git clone https://github.com/alanmeadows/otto.git
 cd otto
 make build        # produces bin/otto
-make install      # installs to $GOPATH/bin
+make install      # installs to ~/.local/bin
 ```
 
-### Pre-built Binaries
+### Prerequisites
 
-Download from [GitHub Releases](https://github.com/alanmeadows/otto/releases). Binaries are available for Linux, macOS, and Windows on amd64 and arm64.
+- **GitHub Copilot CLI** — `npm install -g @github/copilot`
+- **devtunnel** (optional, for remote access) — `curl -sL https://aka.ms/DevTunnelCliInstall | bash`
 
 ## Quick Start
 
@@ -47,8 +47,8 @@ Download from [GitHub Releases](https://github.com/alanmeadows/otto/releases). B
 
 ```bash
 # Set LLM models (defaults shown)
-otto config set models.primary "github-copilot/claude-opus-4.6"
-otto config set models.secondary "github-copilot/gpt-5.2-codex"
+otto config set models.primary "claude-opus-4.6"
+otto config set models.secondary "gpt-5.2-codex"
 
 # Configure a PR provider (GitHub example)
 otto config set pr.default_provider "github"
@@ -61,21 +61,25 @@ otto config set pr.providers.ado.project "myproject"
 otto config set pr.providers.ado.pat "$ADO_PAT"
 ```
 
-### 2. Create and Execute a Spec
+### 2. Start the Dashboard
 
 ```bash
-# Create a spec from a prompt
-otto spec add "Add retry logic to the HTTP client"
+# Start with the Copilot session dashboard
+otto server start --dashboard
 
-# Run each phase (each is idempotent — safe to re-run)
-otto spec requirements --spec add-retry-logic
-otto spec research --spec add-retry-logic
-otto spec design --spec add-retry-logic
-otto spec task generate --spec add-retry-logic
+# Or with remote access via Azure DevTunnel
+otto server start --dashboard --tunnel
 
-# Execute all tasks
-otto spec execute --spec add-retry-logic
+# Enable permanently via config
+otto config set dashboard.enabled true
 ```
+
+Open **http://localhost:4098** in your browser. The dashboard shows:
+- All persisted Copilot CLI sessions from `~/.copilot/session-state/`
+- Live activity timestamps ("30s ago", "5m ago") that update in real time
+- Ability to resume any session and continue the conversation
+- Create new sessions with model selection
+- Real-time streaming of LLM responses, tool calls, and intent changes
 
 ### 3. Monitor a PR
 
@@ -95,6 +99,33 @@ otto pr review https://github.com/org/repo/pull/42
 
 Otto fetches the diff, runs an LLM review, presents comments in a table, and lets you select which to post as inline comments.
 
+## Copilot Dashboard
+
+The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
+
+### Features
+
+- **Session discovery** — automatically lists all persisted sessions from `~/.copilot/session-state/` with summaries and live "last activity" timestamps
+- **Session resume** — click any saved session to resume it with full conversation history
+- **New sessions** — create sessions with model selection (Claude, GPT, Gemini)
+- **Real-time chat** — streaming responses with markdown rendering, tool call indicators, and intent tracking
+- **Azure DevTunnel** — one-click tunnel setup for remote access from your phone
+- **Mobile responsive** — works on phone browsers with touch-friendly sidebar
+
+### Shared Copilot Server
+
+By default, otto spawns its own Copilot CLI process. You can optionally run a shared headless server that otto connects to:
+
+```bash
+# Start a persistent headless copilot server
+copilot --headless --port 4321
+
+# Configure otto to connect to it
+otto config set dashboard.copilot_server "localhost:4321"
+```
+
+This allows otto's dashboard to create and manage sessions through the shared server. Sessions created through the dashboard are accessible to any SDK client connected to the same server.
+
 ## Configuration
 
 ### Config Files
@@ -113,13 +144,8 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `models.primary` | string | `github-copilot/claude-opus-4.6` | Primary LLM model |
-| `models.secondary` | string | `github-copilot/gpt-5.2-codex` | Secondary model for multi-model review |
-| `opencode.url` | string | `http://localhost:4096` | OpenCode server URL |
-| `opencode.auto_start` | bool | `true` | Auto-start OpenCode server if not running |
-| `opencode.username` | string | `opencode` | OpenCode authentication username |
-| `opencode.password` | string | | OpenCode authentication password |
-| `opencode.permissions` | string | `allow` | OpenCode tool permissions (`allow`/`deny`) |
+| `models.primary` | string | `claude-opus-4.6` | Primary LLM model |
+| `models.secondary` | string | `gpt-5.2-codex` | Secondary model for multi-model review |
 | `pr.default_provider` | string | `ado` | Default PR provider (`ado` or `github`) |
 | `pr.max_fix_attempts` | int | `5` | Max auto-fix attempts per PR |
 | `pr.providers.ado.organization` | string | | ADO organization name |
@@ -129,13 +155,13 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `pr.providers.ado.merlinbot` | bool | `false` | Enable MerlinBot integration |
 | `pr.providers.ado.create_work_item` | bool | `false` | Create work items for ADO PRs |
 | `pr.providers.github.token` | string | | GitHub personal access token |
-| `server.poll_interval` | string | `2m` | Daemon PR poll interval (Go duration) |
+| `server.poll_interval` | string | `10m` | Daemon PR poll interval (Go duration) |
 | `server.port` | int | `4097` | Daemon HTTP API port |
 | `server.log_dir` | string | `~/.local/share/otto/logs` | Daemon log directory |
-| `spec.max_parallel_tasks` | int | `4` | Max tasks to run in parallel |
-| `spec.task_timeout` | string | `30m` | Per-task timeout (Go duration) |
-| `spec.max_task_retries` | int | `15` | Max retries for a failed task |
-| `spec.task_briefing` | bool | `true` | Enable task briefing step before execution |
+| `dashboard.port` | int | `4098` | Dashboard web server port |
+| `dashboard.enabled` | bool | `false` | Enable the Copilot session dashboard |
+| `dashboard.auto_start_tunnel` | bool | `false` | Auto-start Azure DevTunnel on dashboard start |
+| `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
 | `repos[].name` | string | | Repository name |
 | `repos[].primary_dir` | string | | Primary checkout directory |
 | `repos[].worktree_dir` | string | | Worktree directory |
@@ -154,21 +180,7 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 ## Command Reference
 
 ```
-otto                          LLM-powered spec engine, task executor, and PR lifecycle manager
-├── spec                      Manage specifications
-│   ├── add <prompt>          Create a new spec from a prompt
-│   ├── list                  List all specs in the repo
-│   ├── requirements [--spec] Generate/refine requirements document
-│   ├── research [--spec]     Generate/refine research document
-│   ├── design [--spec]       Generate/refine design document
-│   ├── execute [--spec]      Execute all pending tasks
-│   ├── questions [--spec]    Auto-resolve open questions
-│   ├── run <prompt> [--spec] Run ad-hoc prompt with spec context
-│   └── task                  Manage spec tasks
-│       ├── generate [--spec] Generate tasks from design document
-│       ├── list [--spec]     List tasks and their status
-│       ├── add <prompt>      Add a manual task
-│       └── run [--id]        Run a specific task
+otto                          LLM-powered PR lifecycle manager
 ├── pr                        Manage pull requests
 │   ├── add <url>             Add a PR for tracking
 │   ├── list                  List tracked PRs
@@ -178,7 +190,11 @@ otto                          LLM-powered spec engine, task executor, and PR lif
 │   ├── log [id]              Show PR activity log
 │   └── review <url>          LLM-powered PR code review
 ├── server                    Manage the otto daemon
-│   ├── start                 Start the daemon (--foreground, --port)
+│   ├── start                 Start the daemon
+│   │   ├── --dashboard       Enable Copilot session dashboard
+│   │   ├── --tunnel          Auto-start Azure DevTunnel
+│   │   ├── --dashboard-port  Dashboard port (default: 4098)
+│   │   └── --foreground      Run in foreground (don't daemonize)
 │   ├── stop                  Stop the daemon
 │   ├── status                Show daemon status
 │   └── install               Install as systemd user service
@@ -194,26 +210,9 @@ otto                          LLM-powered spec engine, task executor, and PR lif
 │   ├── show [--json]         Show merged configuration
 │   └── set <key> <value>     Set a config value
 └── completion                Generate shell completions
-    ├── bash
-    ├── zsh
-    ├── fish
-    └── powershell
 ```
 
 Use `otto <command> --help` for detailed usage of any command.
-
-### Shell Completion
-
-```bash
-# Bash
-otto completion bash > /etc/bash_completion.d/otto
-
-# Zsh
-otto completion zsh > "${fpath[1]}/_otto"
-
-# Fish
-otto completion fish > ~/.config/fish/completions/otto.fish
-```
 
 ## PR Backend Providers
 
@@ -226,20 +225,31 @@ Providers are auto-detected from PR URLs. Configure one or both in the `pr.provi
 
 ## Architecture
 
-Otto follows an LLM-first orchestration pattern:
-
 ```
-Spec Pipeline → Task Execution → PR Monitoring → Notifications
+┌─────────────────────────────────────────────────────────────┐
+│ otto server start --dashboard                               │
+│                                                             │
+│  ┌──────────────────┐   ┌───────────────────────────────┐   │
+│  │ PR API (:4097)   │   │ Dashboard (:4098)             │   │
+│  │ PR monitoring    │   │ Static UI (embed.FS)          │   │
+│  │ Auto-fix/review  │   │ REST API + WebSocket          │   │
+│  └──────────────────┘   │ Real-time session streaming   │   │
+│                         └───────────────┬───────────────┘   │
+│                                         │                   │
+│  ┌──────────────────────────────────────┴───────────────┐   │
+│  │ Copilot Session Manager (copilot-sdk/go)             │   │
+│  │ Create/resume/stream sessions                        │   │
+│  │ Persisted session discovery (~/.copilot/session-state)│   │
+│  └──────────────────────────────────────────────────────┘   │
+│                                                             │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │ DevTunnel Manager (optional)                         │   │
+│  │ Azure DevTunnel for remote access                    │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-1. **Spec pipeline** — each phase (requirements, research, design, tasks) produces a markdown artifact under `.otto/specs/<slug>/`, reviewed by multiple LLM models
-2. **Task execution** — tasks run in dependency order with parallel groups, retries, and an outer protective loop
-3. **PR monitoring** — the daemon polls PR backends, detects review comments and pipeline failures, and dispatches LLM fixes
-4. **Notifications** — webhook-based alerts for PR events
-
-All LLM interaction goes through [OpenCode](https://opencode.ai) via its Go SDK. Otto manages the OpenCode server lifecycle automatically.
-
-See [docs/design.md](docs/design.md) for the full design document.
+All LLM interaction goes through the [GitHub Copilot SDK for Go](https://github.com/github/copilot-sdk). Otto manages the Copilot CLI process lifecycle automatically.
 
 ## Development
 

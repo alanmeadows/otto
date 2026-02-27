@@ -99,11 +99,6 @@ func redactConfig(cfg *config.Config) *config.Config {
 		copy.PR.Providers = redacted
 	}
 
-	// Redact OpenCode password.
-	if copy.OpenCode.Password != "" {
-		copy.OpenCode.Password = "***"
-	}
-
 	return &copy
 }
 

@@ -100,8 +100,21 @@ func forkDaemon(port int, logDir string) error {
 
 	logFile := filepath.Join(logDir, "ottod.log")
 
-	// Fork: re-exec with --foreground, propagating port.
-	cmd := exec.Command(os.Args[0], "server", "start", "--foreground", "--port", strconv.Itoa(port))
+	// Fork: re-exec with --foreground, propagating port and dashboard flags.
+	forkArgs := []string{"server", "start", "--foreground", "--port", strconv.Itoa(port)}
+
+	// Check environment for dashboard flags (set by CLI layer).
+	if os.Getenv("OTTO_DASHBOARD") == "1" {
+		forkArgs = append(forkArgs, "--dashboard")
+	}
+	if os.Getenv("OTTO_TUNNEL") == "1" {
+		forkArgs = append(forkArgs, "--tunnel")
+	}
+	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
+		forkArgs = append(forkArgs, "--dashboard-port", v)
+	}
+
+	cmd := exec.Command(os.Args[0], forkArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	// Redirect output to log file.
@@ -137,6 +150,19 @@ func runForeground(port int, logDir string) error {
 		slog.Warn("failed to load config, using defaults", "error", err)
 		defaultCfg := config.DefaultConfig()
 		cfg = &defaultCfg
+	}
+
+	// Apply dashboard flags from environment (set by CLI before fork).
+	if os.Getenv("OTTO_DASHBOARD") == "1" {
+		cfg.Dashboard.Enabled = true
+	}
+	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.Dashboard.Port = p
+		}
+	}
+	if os.Getenv("OTTO_TUNNEL") == "1" {
+		cfg.Dashboard.AutoStartTunnel = true
 	}
 
 	// Write PID file for foreground mode too (for status checks).

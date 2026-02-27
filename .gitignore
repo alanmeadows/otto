@@ -43,3 +43,5 @@ vendor/
 
 # Otto runtime
 .otto/logs/
+demo.md
+*.png

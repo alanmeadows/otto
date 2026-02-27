@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/llm"
 	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/provider"
 	"github.com/alanmeadows/otto/internal/provider/ado"
@@ -305,19 +305,14 @@ fix attempt counter. If no ID is given, infers from current branch.`,
 			return fmt.Errorf("getting provider %q: %w", pr.Provider, err)
 		}
 
-		// Create server manager for OpenCode.
-		mgr := opencode.NewServerManager(opencode.ServerManagerConfig{
-			BaseURL:   appConfig.OpenCode.URL,
-			AutoStart: appConfig.OpenCode.AutoStart,
-			Password:  appConfig.OpenCode.Password,
-			Username:  appConfig.OpenCode.Username,
-		})
-		if err := mgr.EnsureRunning(ctx); err != nil {
-			return fmt.Errorf("starting OpenCode server: %w", err)
+		// Create LLM client.
+		llmClient := llm.NewCopilotClient(appConfig.Models.Primary)
+		if err := llmClient.Start(ctx); err != nil {
+			return fmt.Errorf("starting Copilot LLM client: %w", err)
 		}
-		defer mgr.Shutdown()
+		defer llmClient.Stop()
 
-		if err := server.FixPR(ctx, pr, backend, mgr, appConfig); err != nil {
+		if err := server.FixPR(ctx, pr, backend, llmClient, appConfig); err != nil {
 			return fmt.Errorf("fixing PR: %w", err)
 		}
 
@@ -592,32 +587,20 @@ func generatePRDescription(ctx context.Context, w io.Writer, workDir, branchName
 		return "", "", fmt.Errorf("building PR description prompt: %w", err)
 	}
 
-	// Create LLM session.
-	mgr := opencode.NewServerManager(opencode.ServerManagerConfig{
-		BaseURL:   appConfig.OpenCode.URL,
-		AutoStart: appConfig.OpenCode.AutoStart,
-		Password:  appConfig.OpenCode.Password,
-		Username:  appConfig.OpenCode.Username,
-	})
-	if err := mgr.EnsureRunning(ctx); err != nil {
-		return "", "", fmt.Errorf("starting OpenCode server: %w", err)
+	// Create LLM client.
+	llmClient := llm.NewCopilotClient(appConfig.Models.Primary)
+	if err := llmClient.Start(ctx); err != nil {
+		return "", "", fmt.Errorf("starting Copilot LLM client: %w", err)
 	}
-	defer mgr.Shutdown()
+	defer llmClient.Stop()
 
-	llm := mgr.LLM()
-	if llm == nil {
-		return "", "", fmt.Errorf("OpenCode server not available")
-	}
-
-	model := opencode.ParseModelRef(appConfig.Models.Primary)
-
-	session, err := llm.CreateSession(ctx, "PR Description", workDir)
+	session, err := llmClient.CreateSession(ctx, "PR Description", workDir)
 	if err != nil {
 		return "", "", fmt.Errorf("creating session: %w", err)
 	}
-	defer llm.DeleteSession(ctx, session.ID, workDir)
+	defer llmClient.DeleteSession(ctx, session.ID)
 
-	resp, err := llm.SendPrompt(ctx, session.ID, prompt, model, workDir)
+	resp, err := llmClient.SendPrompt(ctx, session.ID, prompt)
 	if err != nil {
 		return "", "", fmt.Errorf("LLM prompt failed: %w", err)
 	}

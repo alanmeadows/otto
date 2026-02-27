@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/alanmeadows/otto/internal/server"
 	"github.com/spf13/cobra"
@@ -23,6 +24,10 @@ or installed as a systemd user service for persistent operation.`,
 
 var foregroundFlag bool
 var portFlag int
+var dashboardFlag bool
+var dashboardOnlyFlag bool
+var dashboardPortFlag int
+var tunnelFlag bool
 
 func init() {
 	serverCmd.AddCommand(serverStartCmd)
@@ -33,6 +38,10 @@ func init() {
 
 	serverStartCmd.Flags().BoolVar(&foregroundFlag, "foreground", false, "Run in foreground (don't daemonize)")
 	serverStartCmd.Flags().IntVar(&portFlag, "port", 0, "Server port (default from config or 4097)")
+	serverStartCmd.Flags().BoolVar(&dashboardFlag, "dashboard", false, "Enable the Copilot session dashboard")
+	serverStartCmd.Flags().BoolVar(&dashboardOnlyFlag, "dashboard-only", false, "Run only the dashboard (skip PR monitoring)")
+	serverStartCmd.Flags().IntVar(&dashboardPortFlag, "dashboard-port", 0, "Dashboard port (default from config or 4098)")
+	serverStartCmd.Flags().BoolVar(&tunnelFlag, "tunnel", false, "Auto-start Azure DevTunnel for dashboard")
 }
 
 var serverStartCmd = &cobra.Command{
@@ -42,10 +51,17 @@ var serverStartCmd = &cobra.Command{
 
 By default the daemon forks into the background. Use --foreground
 to run in the current terminal (useful for debugging). The port
-defaults to the config value or 4097.`,
+defaults to the config value or 4097.
+
+Use --dashboard to enable the Copilot session dashboard, which
+serves a web UI for managing Copilot CLI sessions from your browser
+or phone. Use --tunnel to expose the dashboard via Azure DevTunnels.`,
 	Example: `  otto server start
   otto server start --foreground
-  otto server start --port 9090`,
+  otto server start --port 9090
+  otto server start --dashboard
+  otto server start --dashboard --tunnel
+  otto server start --dashboard-only --tunnel`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := portFlag
 		if port == 0 {
@@ -55,6 +71,20 @@ defaults to the config value or 4097.`,
 			port = 4097
 		}
 		logDir := appConfig.Server.LogDir
+
+		// Apply dashboard flags to config so they propagate.
+		if dashboardFlag || dashboardOnlyFlag {
+			appConfig.Dashboard.Enabled = true
+			os.Setenv("OTTO_DASHBOARD", "1")
+		}
+		if dashboardPortFlag > 0 {
+			appConfig.Dashboard.Port = dashboardPortFlag
+			os.Setenv("OTTO_DASHBOARD_PORT", fmt.Sprintf("%d", dashboardPortFlag))
+		}
+		if tunnelFlag {
+			appConfig.Dashboard.AutoStartTunnel = true
+			os.Setenv("OTTO_TUNNEL", "1")
+		}
 
 		return server.StartDaemon(port, logDir, foregroundFlag)
 	},

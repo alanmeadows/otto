@@ -1,4 +1,4 @@
-package opencode
+package llm
 
 import (
 	"context"
@@ -15,7 +15,7 @@ func TestParseJSONResponse_DirectJSON(t *testing.T) {
 	}
 
 	raw := `{"name":"test","value":42}`
-	result, err := ParseJSONResponse[Result](context.Background(), nil, "", "", ModelRef{}, raw)
+	result, err := ParseJSONResponse[Result](context.Background(), nil, "", raw)
 	require.NoError(t, err)
 	assert.Equal(t, "test", result.Name)
 	assert.Equal(t, 42, result.Value)
@@ -27,7 +27,7 @@ func TestParseJSONResponse_MarkdownWrapped(t *testing.T) {
 	}
 
 	raw := "Here is the JSON:\n```json\n{\"name\":\"wrapped\"}\n```\n"
-	result, err := ParseJSONResponse[Result](context.Background(), nil, "", "", ModelRef{}, raw)
+	result, err := ParseJSONResponse[Result](context.Background(), nil, "", raw)
 	require.NoError(t, err)
 	assert.Equal(t, "wrapped", result.Name)
 }
@@ -38,21 +38,21 @@ func TestParseJSONResponse_PreambleText(t *testing.T) {
 	}
 
 	raw := "Sure, here is the result:\n{\"status\":\"ok\"}\nHope that helps!"
-	result, err := ParseJSONResponse[Result](context.Background(), nil, "", "", ModelRef{}, raw)
+	result, err := ParseJSONResponse[Result](context.Background(), nil, "", raw)
 	require.NoError(t, err)
 	assert.Equal(t, "ok", result.Status)
 }
 
 func TestParseJSONResponse_Array(t *testing.T) {
 	raw := `["one","two","three"]`
-	result, err := ParseJSONResponse[[]string](context.Background(), nil, "", "", ModelRef{}, raw)
+	result, err := ParseJSONResponse[[]string](context.Background(), nil, "", raw)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"one", "two", "three"}, result)
 }
 
 func TestParseJSONResponse_ArrayWithPreamble(t *testing.T) {
 	raw := "Here are the items:\n[\"alpha\",\"beta\"]\nDone."
-	result, err := ParseJSONResponse[[]string](context.Background(), nil, "", "", ModelRef{}, raw)
+	result, err := ParseJSONResponse[[]string](context.Background(), nil, "", raw)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"alpha", "beta"}, result)
 }
@@ -62,15 +62,13 @@ func TestParseJSONResponse_RetryViaSession(t *testing.T) {
 		Answer string `json:"answer"`
 	}
 
-	mock := NewMockLLMClient()
+	mock := NewMockClient()
 	mock.DefaultResult = `{"answer":"retried"}`
 
-	// Initial raw is invalid
-	result, err := ParseJSONResponse[Result](context.Background(), mock, "sess-1", "/tmp", ModelRef{ModelID: "test"}, "not json at all")
+	result, err := ParseJSONResponse[Result](context.Background(), mock, "sess-1", "not json at all")
 	require.NoError(t, err)
 	assert.Equal(t, "retried", result.Answer)
 
-	// Check that retry prompts were sent
 	history := mock.GetPromptHistory()
 	assert.GreaterOrEqual(t, len(history), 1)
 }
@@ -80,10 +78,10 @@ func TestParseJSONResponse_FailsAfterRetries(t *testing.T) {
 		X int `json:"x"`
 	}
 
-	mock := NewMockLLMClient()
+	mock := NewMockClient()
 	mock.DefaultResult = "still not json"
 
-	_, err := ParseJSONResponse[Result](context.Background(), mock, "sess-1", "/tmp", ModelRef{}, "bad input")
+	_, err := ParseJSONResponse[Result](context.Background(), mock, "sess-1", "bad input")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to parse JSON response")
 }

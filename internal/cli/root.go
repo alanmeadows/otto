@@ -18,13 +18,13 @@ var (
 	appConfig  *config.Config
 	rootCmd    = &cobra.Command{
 		Use:   "otto",
-		Short: "LLM-powered specification engine, task executor, and PR lifecycle manager",
-		Long: `Otto orchestrates LLM-driven workflows through OpenCode for specification
-authoring, task execution, and pull request lifecycle management.
+		Short: "LLM-powered PR lifecycle manager",
+		Long: `Otto orchestrates LLM-driven workflows through the GitHub Copilot SDK
+for pull request lifecycle management.
 
-It turns natural-language prompts into structured specs, breaks them into
-tasks, executes them via an LLM coding agent, and monitors PRs for review
-feedback — closing the loop automatically.
+It monitors PRs for review feedback, automatically fixes build failures,
+resolves merge conflicts, and responds to code review comments — all
+powered by LLM coding agents.
 
 Run 'otto <command> --help' for details on any subcommand.`,
 		Version:       Version,
@@ -48,7 +48,6 @@ func init() {
 	}
 
 	// Wire all subcommands
-	rootCmd.AddCommand(specCmd)
 	rootCmd.AddCommand(prCmd)
 	rootCmd.AddCommand(repoCmd)
 	rootCmd.AddCommand(worktreeCmd)

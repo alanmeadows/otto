@@ -2,6 +2,7 @@ package repo
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -134,4 +135,137 @@ func checkoutWorktree(repo *config.RepoConfig, name, branchName string) (string,
 	}
 
 	return workDir, nil
+}
+
+// MapPRToCleanWorkDir creates a fresh temporary worktree for PR fix work.
+// Unlike MapPRToWorkDir, this always creates a clean checkout in /tmp using
+// detached HEAD, ensuring no pre-existing dirty state can leak into commits.
+//
+// Returns:
+//   - workDir: path to the clean temporary worktree
+//   - mergeBack: callback to update the user's existing worktree after push
+//     (best-effort; returns error if merge fails)
+//   - cleanup: callback to remove the temporary worktree (always call via defer)
+//   - err: any error during setup
+func MapPRToCleanWorkDir(cfg *config.Config, repoURL, branchName string) (workDir string, mergeBack func() error, cleanup func(), err error) {
+	shortBranch := strings.TrimPrefix(branchName, "refs/heads/")
+
+	// Find matching repo.
+	mgr := NewManager("")
+	repo, err := mgr.FindByRemoteURL(cfg, repoURL)
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("finding repo for URL %q: %w", repoURL, err)
+	}
+
+	// Fetch the branch so we have the latest remote state.
+	fetchCmd := exec.Command("git", "fetch", "origin", shortBranch)
+	fetchCmd.Dir = repo.PrimaryDir
+	_ = fetchCmd.Run() // best effort
+
+	// Create a temp directory for the worktree.
+	tmpDir, err := os.MkdirTemp("", "otto-fix-*")
+	if err != nil {
+		return "", nil, nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	// git worktree add expects the target directory not to exist.
+	os.Remove(tmpDir)
+
+	// Create a detached HEAD worktree at the branch tip.
+	// Detached HEAD avoids conflicting with the same branch being checked out
+	// in the user's existing worktree.
+	cmd := exec.Command("git", "worktree", "add", "--detach", tmpDir, "origin/"+shortBranch)
+	cmd.Dir = repo.PrimaryDir
+	if out, cmdErr := cmd.CombinedOutput(); cmdErr != nil {
+		os.RemoveAll(tmpDir)
+		return "", nil, nil, fmt.Errorf("git worktree add --detach: %s: %w",
+			strings.TrimSpace(string(out)), cmdErr)
+	}
+
+	slog.Info("created clean temporary worktree for PR fix",
+		"branch", shortBranch,
+		"tmpDir", tmpDir,
+	)
+
+	// Identify the user's existing worktree/checkout for merge-back.
+	userWorkDir := findUserWorkDir(repo, shortBranch)
+	if userWorkDir != "" {
+		slog.Info("found user worktree for post-push merge-back",
+			"branch", shortBranch,
+			"userDir", userWorkDir,
+		)
+	}
+
+	// mergeBack updates the user's existing worktree with the pushed changes.
+	mergeBack = func() error {
+		if userWorkDir == "" {
+			return nil
+		}
+		fetchCmd := exec.Command("git", "fetch", "origin", shortBranch)
+		fetchCmd.Dir = userWorkDir
+		_ = fetchCmd.Run() // best effort
+
+		mergeCmd := exec.Command("git", "merge", "--ff-only", "origin/"+shortBranch)
+		mergeCmd.Dir = userWorkDir
+		if out, mergeErr := mergeCmd.CombinedOutput(); mergeErr != nil {
+			return fmt.Errorf("merge --ff-only in %s: %s: %w",
+				userWorkDir, strings.TrimSpace(string(out)), mergeErr)
+		}
+		slog.Info("merged pushed changes back to user worktree",
+			"branch", shortBranch,
+			"userDir", userWorkDir,
+		)
+		return nil
+	}
+
+	// cleanup removes the temporary worktree.
+	primaryDir := repo.PrimaryDir
+	cleanup = func() {
+		rmCmd := exec.Command("git", "worktree", "remove", tmpDir, "--force")
+		rmCmd.Dir = primaryDir
+		_ = rmCmd.Run()
+		os.RemoveAll(tmpDir) // belt and suspenders
+	}
+
+	return tmpDir, mergeBack, cleanup, nil
+}
+
+// findUserWorkDir locates the user's existing checkout for a branch,
+// so we can merge pushed changes back to it.
+func findUserWorkDir(repo *config.RepoConfig, shortBranch string) string {
+	switch repo.GitStrategy {
+	case config.GitStrategyWorktree:
+		name, err := ReverseBranchTemplate(repo.BranchTemplate, shortBranch)
+		if err != nil {
+			name = shortBranch
+		}
+		wtDir := repo.WorktreeDir
+		if wtDir == "" {
+			wtDir = filepath.Join(filepath.Dir(repo.PrimaryDir), "worktrees")
+		}
+		return verifyDirOnBranch(filepath.Join(wtDir, name), shortBranch)
+
+	case config.GitStrategyBranch, config.GitStrategyHandsOff:
+		return verifyDirOnBranch(repo.PrimaryDir, shortBranch)
+
+	default:
+		return ""
+	}
+}
+
+// verifyDirOnBranch checks that dir exists and has the expected branch checked out.
+func verifyDirOnBranch(dir, expectedBranch string) string {
+	info, err := os.Stat(dir)
+	if err != nil || !info.IsDir() {
+		return ""
+	}
+	branchCmd := exec.Command("git", "rev-parse", "--abbrev-ref", "HEAD")
+	branchCmd.Dir = dir
+	out, err := branchCmd.Output()
+	if err != nil {
+		return ""
+	}
+	if strings.TrimSpace(string(out)) == expectedBranch {
+		return dir
+	}
+	return ""
 }

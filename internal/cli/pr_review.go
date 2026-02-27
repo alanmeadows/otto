@@ -8,11 +8,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/llm"
 	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/provider"
 	"github.com/alanmeadows/otto/internal/repo"
-	"github.com/alanmeadows/otto/internal/spec"
 	"github.com/charmbracelet/huh"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/lipgloss/table"
@@ -78,29 +77,17 @@ in the worker pool".`,
 		}
 
 		// Analyze codebase for review context.
-		summary, err := spec.AnalyzeCodebase(workDir)
+		summary, err := repo.AnalyzeCodebase(workDir)
 		if err != nil {
 			slog.Warn("codebase analysis failed, continuing without summary", "error", err)
 		}
 
-		// Step 4: Create OpenCode session.
-		mgr := opencode.NewServerManager(opencode.ServerManagerConfig{
-			BaseURL:   appConfig.OpenCode.URL,
-			AutoStart: appConfig.OpenCode.AutoStart,
-			Password:  appConfig.OpenCode.Password,
-			Username:  appConfig.OpenCode.Username,
-		})
-		if err := mgr.EnsureRunning(ctx); err != nil {
-			return fmt.Errorf("starting OpenCode server: %w", err)
+		// Step 4: Create LLM client.
+		llmClient := llm.NewCopilotClient(appConfig.Models.Primary)
+		if err := llmClient.Start(ctx); err != nil {
+			return fmt.Errorf("starting Copilot LLM client: %w", err)
 		}
-		defer mgr.Shutdown()
-
-		llm := mgr.LLM()
-		if llm == nil {
-			return fmt.Errorf("OpenCode server started but no LLM client available")
-		}
-
-		model := opencode.ParseModelRef(appConfig.Models.Primary)
+		defer llmClient.Stop()
 
 		// Step 6: Send pr-review.md prompt.
 		templateData := map[string]string{
@@ -120,21 +107,21 @@ in the worker pool".`,
 			return fmt.Errorf("building review prompt: %w", err)
 		}
 
-		session, err := llm.CreateSession(ctx, fmt.Sprintf("PR Review #%s", prInfo.ID), workDir)
+		session, err := llmClient.CreateSession(ctx, fmt.Sprintf("PR Review #%s", prInfo.ID), workDir)
 		if err != nil {
 			return fmt.Errorf("creating review session: %w", err)
 		}
-		defer llm.DeleteSession(ctx, session.ID, workDir)
+		defer llmClient.DeleteSession(ctx, session.ID)
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Analyzing changes against %s...\n", prInfo.TargetBranch)
 
-		resp, err := llm.SendPrompt(ctx, session.ID, prompt, model, workDir)
+		resp, err := llmClient.SendPrompt(ctx, session.ID, prompt)
 		if err != nil {
 			return fmt.Errorf("review prompt failed: %w", err)
 		}
 
 		// Step 7: Parse JSON response.
-		comments, err := opencode.ParseJSONResponse[[]reviewComment](ctx, llm, session.ID, workDir, model, resp.Content)
+		comments, err := llm.ParseJSONResponse[[]reviewComment](ctx, llmClient, session.ID, resp.Content)
 		if err != nil {
 			return fmt.Errorf("parsing review response: %w", err)
 		}

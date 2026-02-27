@@ -1,0 +1,391 @@
+package dashboard
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"sync"
+
+	"github.com/alanmeadows/otto/internal/copilot"
+	"nhooyr.io/websocket"
+)
+
+// Bridge manages WebSocket connections and broadcasts session events to clients.
+type Bridge struct {
+	manager       *copilot.Manager
+	clients       map[string]*wsClient
+	mu            sync.RWMutex
+	nextID        int
+	onStartTunnel func()
+	onStopTunnel  func()
+	onListWorktrees func() []WorktreeSummary
+}
+
+type wsClient struct {
+	conn *websocket.Conn
+	ctx  context.Context
+	mu   sync.Mutex // serializes writes
+}
+
+// NewBridge creates a Bridge wired to the given copilot Manager.
+// Call this after the Manager is created; it registers the event handler.
+func NewBridge(mgr *copilot.Manager) *Bridge {
+	b := &Bridge{
+		manager: mgr,
+		clients: make(map[string]*wsClient),
+	}
+	mgr.SetEventHandler(b.onSessionEvent)
+	return b
+}
+
+// HandleWS is the HTTP handler for the /ws endpoint.
+func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true, // accept any origin for DevTunnel access
+	})
+	if err != nil {
+		slog.Warn("websocket accept failed", "error", err)
+		return
+	}
+
+	ctx := r.Context()
+	b.mu.Lock()
+	b.nextID++
+	id := fmt.Sprintf("client-%d", b.nextID)
+	client := &wsClient{conn: c, ctx: ctx}
+	b.clients[id] = client
+	b.mu.Unlock()
+
+	slog.Info("websocket client connected", "id", id, "remote", r.RemoteAddr)
+
+	// Send initial state.
+	b.sendSessionsList(client)
+	b.sendPersistedSessions(client)
+
+	// Read loop — handle client commands.
+	b.readLoop(ctx, id, client)
+}
+
+func (b *Bridge) readLoop(ctx context.Context, id string, client *wsClient) {
+	defer func() {
+		b.mu.Lock()
+		delete(b.clients, id)
+		b.mu.Unlock()
+		client.conn.Close(websocket.StatusNormalClosure, "")
+		slog.Info("websocket client disconnected", "id", id)
+	}()
+
+	for {
+		_, data, err := client.conn.Read(ctx)
+		if err != nil {
+			return // client disconnected
+		}
+
+		var msg BridgeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			slog.Warn("invalid ws message", "error", err, "client", id)
+			continue
+		}
+
+		b.handleClientMessage(ctx, client, msg)
+	}
+}
+
+func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg BridgeMessage) {
+	switch msg.Type {
+	case MsgGetSessions:
+		b.sendSessionsList(client)
+
+	case MsgGetHistory:
+		var p GetHistoryPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		history, err := b.manager.GetHistory(p.SessionName)
+		if err != nil {
+			return
+		}
+		msgs := make([]MessageSummary, len(history))
+		for i, m := range history {
+			msgs[i] = MessageSummary{Role: m.Role, Content: m.Content, Timestamp: m.Timestamp}
+		}
+		b.sendTo(client, MsgSessionHistory, SessionHistoryPayload{
+			SessionName: p.SessionName,
+			Messages:    msgs,
+		})
+
+	case MsgSendMessage:
+		var p SendMessagePayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		go func() {
+			if err := b.manager.SendPrompt(ctx, p.SessionName, p.Prompt); err != nil {
+				slog.Warn("send prompt failed", "session", p.SessionName, "error", err)
+			}
+		}()
+
+	case MsgCreateSession:
+		var p CreateSessionPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		go func() {
+			if err := b.manager.CreateSession(ctx, p.Name, p.Model, p.WorkingDir); err != nil {
+				slog.Warn("create session failed", "name", p.Name, "error", err)
+				b.sendTo(client, MsgSessionError, ErrorPayload{
+					SessionName: p.Name,
+					Message:     err.Error(),
+				})
+				return
+			}
+			b.broadcastSessionsList()
+		}()
+
+	case MsgResumeSession:
+		var p ResumeSessionPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		go func() {
+			if err := b.manager.ResumeSession(ctx, p.SessionID, p.DisplayName); err != nil {
+				slog.Warn("resume session failed", "id", p.SessionID, "error", err)
+				return
+			}
+			b.broadcastSessionsList()
+		}()
+
+	case MsgCloseSession:
+		var p CloseSessionPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if err := b.manager.CloseSession(p.SessionName); err != nil {
+			slog.Warn("close session failed", "name", p.SessionName, "error", err)
+			return
+		}
+		b.broadcastSessionsList()
+
+	case MsgGetPersistedSessions:
+		b.sendPersistedSessions(client)
+
+	case MsgListWorktrees:
+		if b.onListWorktrees != nil {
+			wts := b.onListWorktrees()
+			b.sendTo(client, MsgWorktreesList, WorktreesListPayload{Worktrees: wts})
+		}
+
+	case MsgStartTunnel:
+		if b.onStartTunnel != nil {
+			b.onStartTunnel()
+		}
+
+	case MsgStopTunnel:
+		if b.onStopTunnel != nil {
+			b.onStopTunnel()
+		}
+	}
+}
+
+// --- Event handler ---
+
+func (b *Bridge) onSessionEvent(evt copilot.SessionEvent) {
+	switch evt.Type {
+	case copilot.EventContentDelta:
+		b.broadcast(MsgContentDelta, ContentDeltaPayload{
+			SessionName: evt.SessionName,
+			Content:     deref(evt.Data.Content),
+		})
+	case copilot.EventToolStart:
+		b.broadcast(MsgToolStarted, ToolStartedPayload{
+			SessionName: evt.SessionName,
+			ToolName:    deref(evt.Data.ToolName),
+			CallID:      deref(evt.Data.ToolCallID),
+			ToolInput:   deref(evt.Data.ToolInput),
+		})
+	case copilot.EventToolComplete:
+		b.broadcast(MsgToolCompleted, ToolCompletedPayload{
+			SessionName: evt.SessionName,
+			CallID:      deref(evt.Data.ToolCallID),
+			Result:      deref(evt.Data.ToolResult),
+			Success:     derefBool(evt.Data.ToolSuccess),
+		})
+	case copilot.EventIntentChanged:
+		b.broadcast(MsgIntentChanged, IntentChangedPayload{
+			SessionName: evt.SessionName,
+			Intent:      deref(evt.Data.Intent),
+		})
+	case copilot.EventTurnStart:
+		b.broadcast(MsgTurnStart, TurnPayload{SessionName: evt.SessionName})
+		b.broadcastSessionsList()
+	case copilot.EventTurnEnd:
+		b.broadcast(MsgTurnEnd, TurnPayload{SessionName: evt.SessionName})
+		b.broadcastSessionsList()
+	case copilot.EventSessionError:
+		b.broadcast(MsgSessionError, ErrorPayload{
+			SessionName: evt.SessionName,
+			Message:     deref(evt.Data.ErrorMessage),
+		})
+		b.broadcastSessionsList()
+	case copilot.EventReasoningDelta:
+		b.broadcast(MsgReasoningDelta, ReasoningDeltaPayload{
+			SessionName: evt.SessionName,
+			ReasoningID: deref(evt.Data.ReasoningID),
+			Content:     deref(evt.Data.Content),
+		})
+	case copilot.EventSessionIdle:
+		b.broadcastSessionsList()
+	}
+}
+
+// --- Send helpers ---
+
+func (b *Bridge) sendSessionsList(client *wsClient) {
+	sessions := b.manager.ListSessions()
+	summaries := make([]SessionSummary, len(sessions))
+	for i, s := range sessions {
+		summaries[i] = SessionSummary{
+			Name:         s.Name,
+			Model:        s.Model,
+			SessionID:    s.SessionID,
+			WorkingDir:   s.WorkingDir,
+			CreatedAt:    s.CreatedAt,
+			MessageCount: s.MessageCount,
+			IsProcessing: s.State == copilot.StateProcessing,
+			Intent:       s.Intent,
+			State:        string(s.State),
+		}
+	}
+	b.sendTo(client, MsgSessionsList, SessionsListPayload{
+		Sessions:      summaries,
+		ActiveSession: b.manager.ActiveSessionName(),
+	})
+}
+
+func (b *Bridge) sendPersistedSessions(client *wsClient) {
+	persisted := b.manager.ListPersistedSessions()
+	summaries := make([]PersistedSessionSummary, len(persisted))
+	for i, p := range persisted {
+		summaries[i] = PersistedSessionSummary{
+			SessionID:    p.SessionID,
+			Summary:      p.Summary,
+			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:    p.CreatedAt,
+			UpdatedAt:    p.UpdatedAt,
+		}
+	}
+	b.sendTo(client, MsgPersistedSessionsList, PersistedSessionsListPayload{
+		Sessions: summaries,
+	})
+}
+
+func (b *Bridge) broadcastPersistedSessions() {
+	persisted := b.manager.ListPersistedSessions()
+	summaries := make([]PersistedSessionSummary, len(persisted))
+	for i, p := range persisted {
+		summaries[i] = PersistedSessionSummary{
+			SessionID:    p.SessionID,
+			Summary:      p.Summary,
+			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
+			CreatedAt:    p.CreatedAt,
+			UpdatedAt:    p.UpdatedAt,
+		}
+	}
+	b.broadcast(MsgPersistedSessionsList, PersistedSessionsListPayload{
+		Sessions: summaries,
+	})
+}
+
+func (b *Bridge) broadcastSessionsList() {
+	sessions := b.manager.ListSessions()
+	summaries := make([]SessionSummary, len(sessions))
+	for i, s := range sessions {
+		summaries[i] = SessionSummary{
+			Name:         s.Name,
+			Model:        s.Model,
+			SessionID:    s.SessionID,
+			WorkingDir:   s.WorkingDir,
+			CreatedAt:    s.CreatedAt,
+			MessageCount: s.MessageCount,
+			IsProcessing: s.State == copilot.StateProcessing,
+			Intent:       s.Intent,
+			State:        string(s.State),
+		}
+	}
+	b.broadcast(MsgSessionsList, SessionsListPayload{
+		Sessions:      summaries,
+		ActiveSession: b.manager.ActiveSessionName(),
+	})
+}
+
+func (b *Bridge) broadcast(msgType string, payload any) {
+	data, err := json.Marshal(BridgeMessage{
+		Type:    msgType,
+		Payload: mustMarshal(payload),
+	})
+	if err != nil {
+		return
+	}
+
+	b.mu.RLock()
+	clients := make([]*wsClient, 0, len(b.clients))
+	for _, c := range b.clients {
+		clients = append(clients, c)
+	}
+	b.mu.RUnlock()
+
+	for _, c := range clients {
+		c.mu.Lock()
+		_ = c.conn.Write(c.ctx, websocket.MessageText, data)
+		c.mu.Unlock()
+	}
+}
+
+func (b *Bridge) sendTo(client *wsClient, msgType string, payload any) {
+	data, err := json.Marshal(BridgeMessage{
+		Type:    msgType,
+		Payload: mustMarshal(payload),
+	})
+	if err != nil {
+		return
+	}
+	client.mu.Lock()
+	_ = client.conn.Write(client.ctx, websocket.MessageText, data)
+	client.mu.Unlock()
+}
+
+// BroadcastTunnelStatus sends tunnel status to all clients.
+func (b *Bridge) BroadcastTunnelStatus(running bool, url string) {
+	b.broadcast(MsgTunnelStatus, TunnelStatusPayload{Running: running, URL: url})
+}
+
+// BroadcastWorktrees sends the worktrees list to all clients.
+func (b *Bridge) BroadcastWorktrees(worktrees []WorktreeSummary) {
+	b.broadcast(MsgWorktreesList, WorktreesListPayload{Worktrees: worktrees})
+}
+
+// SendWorktreesTo sends the worktrees list to a single client.
+func (b *Bridge) SendWorktreesTo(client *wsClient, worktrees []WorktreeSummary) {
+	b.sendTo(client, MsgWorktreesList, WorktreesListPayload{Worktrees: worktrees})
+}
+
+func mustMarshal(v any) json.RawMessage {
+	data, _ := json.Marshal(v)
+	return data
+}
+
+func deref(s *string) string {
+	if s != nil {
+		return *s
+	}
+	return ""
+}
+
+func derefBool(b *bool) bool {
+	if b != nil {
+		return *b
+	}
+	return false
+}

@@ -5,27 +5,17 @@ import "time"
 // Config is the top-level otto configuration.
 type Config struct {
 	Models        ModelsConfig        `json:"models"`
-	OpenCode      OpenCodeConfig      `json:"opencode"`
 	PR            PRConfig            `json:"pr"`
 	Repos         []RepoConfig        `json:"repos"`
 	Server        ServerConfig        `json:"server"`
-	Spec          SpecConfig          `json:"spec"`
+	Dashboard     DashboardConfig     `json:"dashboard"`
 	Notifications NotificationsConfig `json:"notifications"`
 }
 
-// ModelsConfig defines the LLM models used in the multi-model review pipeline.
+// ModelsConfig defines the LLM models used by the Copilot SDK.
 type ModelsConfig struct {
 	Primary   string `json:"primary"`
 	Secondary string `json:"secondary"`
-}
-
-// OpenCodeConfig controls the OpenCode server integration.
-type OpenCodeConfig struct {
-	URL         string `json:"url"`
-	AutoStart   bool   `json:"auto_start"`
-	Username    string `json:"username"`
-	Password    string `json:"password"`
-	Permissions string `json:"permissions"`
 }
 
 // PRConfig holds PR lifecycle management settings.
@@ -89,35 +79,12 @@ func (s ServerConfig) ParsePollInterval() time.Duration {
 	return d
 }
 
-// SpecConfig holds specification system settings.
-type SpecConfig struct {
-	MaxParallelTasks int    `json:"max_parallel_tasks"`
-	TaskTimeout      string `json:"task_timeout"`
-	MaxTaskRetries   int    `json:"max_task_retries"`
-	TaskBriefing     *bool  `json:"task_briefing"`
-}
-
-// IsTaskBriefingEnabled returns whether the task briefing step is enabled.
-// Defaults to true when not explicitly set.
-func (s SpecConfig) IsTaskBriefingEnabled() bool {
-	if s.TaskBriefing == nil {
-		return true
-	}
-	return *s.TaskBriefing
-}
-
-// ParseTaskTimeout returns the task timeout as a time.Duration.
-func (s SpecConfig) ParseTaskTimeout() time.Duration {
-	d, err := time.ParseDuration(s.TaskTimeout)
-	if err != nil {
-		return 30 * time.Minute
-	}
-	return d
-}
-
-// boolPtr returns a pointer to the given bool value.
-func boolPtr(b bool) *bool {
-	return &b
+// DashboardConfig holds settings for the Copilot session dashboard.
+type DashboardConfig struct {
+	Port            int    `json:"port"`
+	Enabled         bool   `json:"enabled"`
+	AutoStartTunnel bool   `json:"auto_start_tunnel"`
+	CopilotServer   string `json:"copilot_server"` // e.g. "localhost:4321" to connect to shared headless server
 }
 
 // NotificationsConfig holds notification settings.
@@ -130,14 +97,8 @@ type NotificationsConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		Models: ModelsConfig{
-			Primary:   "github-copilot/claude-opus-4.6",
-			Secondary: "github-copilot/gpt-5.2-codex",
-		},
-		OpenCode: OpenCodeConfig{
-			URL:         "http://localhost:4096",
-			AutoStart:   true,
-			Username:    "opencode",
-			Permissions: "allow",
+			Primary:   "claude-opus-4.6",
+			Secondary: "gpt-5.2-codex",
 		},
 		PR: PRConfig{
 			DefaultProvider: "ado",
@@ -149,11 +110,9 @@ func DefaultConfig() Config {
 			Port:         4097,
 			LogDir:       "~/.local/share/otto/logs",
 		},
-		Spec: SpecConfig{
-			MaxParallelTasks: 4,
-			TaskTimeout:      "30m",
-			MaxTaskRetries:   15,
-			TaskBriefing:     boolPtr(true),
+		Dashboard: DashboardConfig{
+			Port:    4098,
+			Enabled: false,
 		},
 	}
 }

@@ -9,7 +9,8 @@ import (
 	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
-	"github.com/alanmeadows/otto/internal/opencode"
+	"github.com/alanmeadows/otto/internal/dashboard"
+	"github.com/alanmeadows/otto/internal/llm"
 )
 
 // pollTrigger is a channel that signals the monitor loop to run an immediate
@@ -46,22 +47,32 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 	var wg sync.WaitGroup
 
 	// Start the monitoring loop in background.
-	smCfg := opencode.ServerManagerConfig{
-		BaseURL:   cfg.OpenCode.URL,
-		AutoStart: cfg.OpenCode.AutoStart,
-		Password:  cfg.OpenCode.Password,
-		Username:  cfg.OpenCode.Username,
-	}
-	serverMgr := opencode.NewServerManager(smCfg)
-	if err := serverMgr.EnsureRunning(ctx); err != nil {
-		slog.Warn("OpenCode server not available — PR monitoring disabled", "error", err)
+	llmClient := llm.NewCopilotClient(cfg.Models.Primary)
+	if err := llmClient.Start(ctx); err != nil {
+		slog.Warn("Copilot LLM client not available — PR monitoring disabled", "error", err)
 	} else {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			defer serverMgr.Shutdown()
-			if err := RunMonitorLoop(ctx, cfg, serverMgr); err != nil {
+			defer llmClient.Stop()
+			if err := RunMonitorLoop(ctx, cfg, llmClient); err != nil {
 				slog.Error("monitoring loop error", "error", err)
+			}
+		}()
+	}
+
+	// Start dashboard server if enabled.
+	if cfg.Dashboard.Enabled {
+		dashPort := cfg.Dashboard.Port
+		if dashPort == 0 {
+			dashPort = 4098
+		}
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			dashSrv := dashboard.NewServer(cfg)
+			if err := dashSrv.Start(ctx, dashPort); err != nil {
+				slog.Error("dashboard server error", "error", err)
 			}
 		}()
 	}

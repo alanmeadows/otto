@@ -99,6 +99,10 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 
 			if strings.Contains(line, ".devtunnels.ms") {
 				if match := tunnelURLPattern.FindString(line); match != "" {
+					// Skip the inspect/debug URL — we want the actual app URL.
+					if strings.Contains(match, "-inspect") {
+						continue
+					}
 					m.mu.Lock()
 					m.url = match
 					cb := m.onStatusChange

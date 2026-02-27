@@ -9,6 +9,7 @@ const state = {
     reconnectDelay: 1000,
     reconnectTimer: null,
     streamingContent: {},  // sessionName -> accumulated content
+    renderedMessageCount: 0,  // how many history messages we've rendered
     tunnelRunning: false,
     tunnelURL: '',
 };
@@ -74,7 +75,12 @@ function setConnectionStatus(status) {
 function handleMessage(msg) {
     switch (msg.type) {
         case 'sessions_list': handleSessionsList(msg.payload); break;
-        case 'session_history': handleSessionHistory(msg.payload); break;
+        case 'session_history':
+            if (state._nextHistoryAppendOnly) {
+                msg.payload._appendOnly = true;
+                state._nextHistoryAppendOnly = false;
+            }
+            handleSessionHistory(msg.payload); break;
         case 'content_delta': handleContentDelta(msg.payload); break;
         case 'tool_started': handleToolStarted(msg.payload); break;
         case 'tool_completed': handleToolCompleted(msg.payload); break;
@@ -102,11 +108,25 @@ function handleSessionsList(payload) {
 
 function handleSessionHistory(payload) {
     const container = document.getElementById('chat-messages');
-    container.innerHTML = '';
-    (payload.messages || []).forEach(msg => {
-        appendChatMessage(msg.role, msg.content, false);
-    });
+    const messages = (payload.messages || []).filter(msg => msg.content && msg.content.trim());
+
+    if (payload._appendOnly) {
+        // Only append messages we haven't rendered yet.
+        const newMessages = messages.slice(state.renderedMessageCount);
+        newMessages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
+    } else {
+        container.innerHTML = '';
+        messages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
+    }
+    state.renderedMessageCount = messages.length;
     scrollToBottom();
+}
+
+function fetchAndAppendNew(sessionName) {
+    // We'll handle this by sending get_history and marking it as append-only
+    // via a one-shot flag.
+    state._nextHistoryAppendOnly = true;
+    send('get_history', { session_name: sessionName });
 }
 
 function handleContentDelta(payload) {
@@ -122,8 +142,18 @@ function handleContentDelta(payload) {
 
 function handleToolStarted(payload) {
     if (payload.session_name !== state.activeSession) return;
-    appendToolIndicator(payload.call_id || payload.call_id, payload.tool_name, 'running');
-    updateActivity(`🔧 ${payload.tool_name}...`);
+    // Extract a short description from tool input JSON
+    var detail = '';
+    if (payload.tool_input) {
+        try {
+            var args = JSON.parse(payload.tool_input);
+            detail = args.path || args.command || args.pattern || args.description || args.file_text?.substring(0,30) || '';
+            if (detail.length > 60) detail = detail.substring(0, 57) + '...';
+        } catch(e) {}
+    }
+    var label = payload.tool_name + (detail ? ': ' + detail : '');
+    appendToolIndicator(payload.call_id, label, 'running');
+    updateActivity('🔧 ' + payload.tool_name + '...');
     updateSessionState(payload.session_name, 'processing');
 }
 
@@ -156,8 +186,9 @@ function handleTurnEnd(payload) {
         delete state.streamingContent[key];
     } else if (payload.session_name === state.activeSession) {
         // No streaming deltas were received — the response came as a complete
-        // assistant.message. Refetch history to display it.
-        send('get_history', { session_name: payload.session_name });
+        // assistant.message. Fetch history and append only new messages
+        // (without clearing existing tool indicators and content).
+        fetchAndAppendNew(payload.session_name);
     }
     updateSessionState(payload.session_name, 'idle');
     if (payload.session_name === state.activeSession) {
@@ -473,6 +504,7 @@ function isRecentlyActive(isoStr) {
 
 function selectSession(name) {
     state.activeSession = name;
+    state.renderedMessageCount = 0;
     renderSessionList();
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('chat-view').classList.remove('hidden');

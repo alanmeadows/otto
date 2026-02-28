@@ -13,7 +13,9 @@ Otto solves three problems:
 
 ### 📱 Drive Copilot from your phone
 
-Otto's web dashboard discovers all your Copilot CLI sessions from `~/.copilot/session-state/`, shows their live status, and lets you resume and interact with them from any browser. Start a session at your desk, pick it up from your phone on the couch. Protected by Entra ID authentication via Azure DevTunnels — only you (or your team) can access it.
+Otto's web dashboard discovers all your Copilot CLI sessions from `~/.copilot/session-state/`, shows their live status, and lets you resume and interact with them from any browser. Start a session at your desk, pick it up from your phone on the couch. Protected by a secret access key via Azure DevTunnels.
+
+![Otto Dashboard showing saved sessions with activity timestamps](docs/images/dashboard-sessions.png)
 
 ### 🔍 Guided PR reviews with a single command
 
@@ -22,7 +24,9 @@ otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123 \
   "focus on error handling, concurrency safety, and resource cleanup"
 ```
 
-Not a generic "find bugs" review — you tell otto what to focus on and it applies that lens across the entire diff. The guidance parameter turns a noisy LLM review into a directed expert review that catches the things you actually care about.
+Not a generic "find bugs" review — you tell otto what to focus on and it applies that lens across the entire diff. Otto checks out the full repo so the LLM can read surrounding code for context, not just the diff. It then presents review comments in a table and lets you interactively select which to post as inline comments on the PR.
+
+![PR review table showing severity, file, line, and comment](docs/images/pr-review-table.png)
 
 ### 🤖 Hands-off PR lifecycle management
 
@@ -31,6 +35,8 @@ otto pr add https://dev.azure.com/org/project/_git/repo/pullrequest/123
 ```
 
 Otto watches your PR continuously. When a pipeline fails, it reads the build logs, classifies the failure (infrastructure vs code), and fixes it. When a reviewer leaves comments, it evaluates each one, fixes the code if it agrees, and replies with its reasoning. When merge conflicts appear, it rebases and resolves them. When MerlinBot flags policy issues, it addresses them. All while you're working on something else.
+
+![otto pr list showing tracked PRs with stage status](docs/images/pr-list-terminal.png)
 
 The goal: submit a PR and let otto get it to green without you babysitting it.
 

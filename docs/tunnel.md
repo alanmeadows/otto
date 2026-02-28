@@ -26,7 +26,28 @@ The authentication provider you choose here determines how tunnel visitors authe
 otto server start --dashboard --tunnel
 ```
 
-The tunnel URL is printed in the logs and shown in the dashboard sidebar. Access it from any browser — you'll be prompted to authenticate via Entra ID (or GitHub, depending on your `devtunnel user login` choice).
+On tunnel start, otto generates a secret access key and logs the full access URL:
+
+```
+INFO dashboard access URL url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1d4e5...
+```
+
+Copy this URL and open it on your phone or any browser. The key is embedded in the URL so you can share it with yourself via Teams/iMessage/email without needing to remember a passcode.
+
+The first visit with `?key=` sets a browser cookie (30 days) and redirects to a clean URL — subsequent visits don't need the key.
+
+## Dashboard Access Control
+
+Otto uses a URL-based access key to protect the dashboard:
+
+- **With key** (`?key=<secret>` or cookie): full dashboard access
+- **Without key**: passcode prompt page
+- **Local access** (localhost): always allowed, no key needed
+- **Session share links** (`/shared/{token}`): bypass dashboard auth — the token is the auth
+
+The key is shown in:
+- The server logs on tunnel start
+- The dashboard sidebar tunnel URL field (for easy copying)
 
 ## Configuration
 
@@ -40,37 +61,20 @@ otto config set dashboard.tunnel_id "yourname-otto"
 
 The URL is still a random subdomain (e.g. `https://0mwbqhhp-4098.usw3.devtunnels.ms`) — the tunnel ID is a local label that ensures the same URL is reused.
 
-### Access Control
+### Tunnel Access Mode
 
-Control who can reach the tunnel:
+Control who can reach the tunnel URL (before hitting otto's key check):
 
 ```bash
+# Entra tenant — any user in your AAD tenant (recommended)
+otto config set dashboard.tunnel_access "tenant"
+
 # Owner only (default) — only your devtunnel account
 otto config set dashboard.tunnel_access "authenticated"
 
-# Entra tenant — any user in your AAD tenant (e.g. all @microsoft.com)
-otto config set dashboard.tunnel_access "tenant"
-
-# Anonymous — anyone with the URL (no login required)
+# Anonymous — anyone with the URL (no DevTunnel login)
 otto config set dashboard.tunnel_access "anonymous"
-
-# GitHub org — members of a specific org
-otto config set dashboard.tunnel_allow_org "my-github-org"
 ```
-
-### Dashboard-Level Access Control
-
-Even if the tunnel is set to `tenant` (allowing any FTE to reach the URL), otto can restrict who actually sees the dashboard using JWT identity from the DevTunnel headers:
-
-```bash
-# Set your email as the dashboard owner
-otto config set dashboard.owner_email "you@microsoft.com"
-
-# Grant access to specific colleagues
-otto config set dashboard.allowed_users '["alice@microsoft.com", "bob@microsoft.com"]'
-```
-
-Allowed users can also be managed live from the dashboard sidebar without restarting. Session share links (`/shared/{token}`) always bypass dashboard access control — the token is the auth.
 
 ### Auto-Start
 
@@ -80,13 +84,18 @@ Start the tunnel automatically whenever the dashboard starts:
 otto config set dashboard.auto_start_tunnel true
 ```
 
+### Process Lifecycle
+
+The devtunnel process is bound to otto's lifecycle:
+- `Pdeathsig` ensures the kernel kills devtunnel if otto crashes
+- `Setpgid` allows killing the entire process group on shutdown
+- No orphaned tunnel processes after otto exits
+
 ## All Config Keys
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL |
 | `dashboard.tunnel_access` | string | `authenticated` | `anonymous`, `tenant`, or `authenticated` |
-| `dashboard.tunnel_allow_org` | string | | GitHub org to grant access |
+| `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
 | `dashboard.auto_start_tunnel` | bool | `false` | Auto-start tunnel with dashboard |
-| `dashboard.owner_email` | string | | Dashboard owner email |
-| `dashboard.allowed_users` | string[] | | Emails allowed full dashboard access |

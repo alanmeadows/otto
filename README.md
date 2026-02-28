@@ -172,42 +172,35 @@ https://your-tunnel.devtunnels.ms/shared/6548666f0382549d...
 
 The recipient sees the conversation streaming live — tool calls, responses, intent changes — but no ability to send messages or access other sessions.
 
-### Remote Access with Entra ID
+### Remote Access
 
-To access the dashboard from your phone or share it with your team, use Azure DevTunnels with Entra ID authentication:
+To access the dashboard from your phone, use Azure DevTunnels:
 
 ```bash
-# One-time setup: install devtunnel and login with your Microsoft account
+# One-time setup: install devtunnel and login
 curl -sL https://aka.ms/DevTunnelCliInstall | bash
-devtunnel user login -e
+devtunnel user login -e   # Entra ID (Microsoft), or -g for GitHub
 ```
 
 Recommended configuration:
 
 ```bash
-# Set your identity (so otto knows you're the owner)
-otto config set dashboard.owner_email "you@microsoft.com"
-
-# Use Entra tenant auth — any FTE can reach the URL, but only
-# you and your allowed_users list can access the dashboard
-otto config set dashboard.tunnel_access "tenant"
-
-# Persistent tunnel ID — gives you a stable URL across restarts
+# Persistent tunnel ID — stable URL across restarts
 otto config set dashboard.tunnel_id "yourname-otto"
 
 # Start the dashboard with tunnel
 otto server start --dashboard --tunnel
 ```
 
-Grant access to specific colleagues (live from the dashboard sidebar, or via config):
+On start, otto logs an access URL with an embedded secret key:
 
-```bash
-otto config set dashboard.allowed_users '["alice@microsoft.com", "bob@microsoft.com"]'
+```
+INFO dashboard access URL url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1...
 ```
 
-Users not in the allowed list get a 403 when accessing the dashboard through the tunnel. Session share links (`/shared/{token}`) bypass this — anyone with the link can view that specific session.
+Copy this URL to your phone — the key authenticates you automatically and sets a cookie for future visits. Users without the key see a passcode prompt. Session share links (`/shared/{token}`) bypass dashboard auth.
 
-> **Note:** The tunnel ID is a local label for persistence — the public URL is always a random subdomain (e.g. `https://0mwbqhhp-4098.usw3.devtunnels.ms`). The ID ensures the URL stays the same across restarts. Use `devtunnel user login -e` for Entra (Microsoft accounts) or `-g` for GitHub.
+See [docs/tunnel.md](docs/tunnel.md) for the full setup guide.
 
 ## Configuration
 

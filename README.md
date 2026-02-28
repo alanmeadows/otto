@@ -48,7 +48,7 @@ The goal: submit a PR and let otto get it to green without you babysitting it.
 - **Session sharing** — generate time-limited read-only links to share a single session's live conversation
 - **Remote access** — Azure DevTunnel integration with Entra ID, org-scoped, or anonymous access control
 - **Session discovery** — automatically discovers persisted sessions with live activity timestamps
-- **Notifications** — Microsoft Teams webhook notifications for PR events
+- **Notifications** — Microsoft Teams notifications for PR events via Power Automate ([setup guide](docs/notifications.md))
 - **Multi-provider** — pluggable PR backends for Azure DevOps and GitHub
 
 ## Installation

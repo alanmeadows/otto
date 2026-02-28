@@ -66,16 +66,21 @@ make install      # installs to ~/.local/bin
 ### 1. Configure
 
 ```bash
-# Configure a PR provider
+# Azure DevOps — only org and project needed if you're logged into az CLI
 otto config set pr.default_provider "ado"
 otto config set pr.providers.ado.organization "myorg"
 otto config set pr.providers.ado.project "myproject"
-otto config set pr.providers.ado.pat "$ADO_PAT"
+
+# Otto authenticates via Entra ID (az CLI) automatically — no PAT required.
+# Just make sure you're logged in:
+az login
 
 # Or GitHub
 otto config set pr.default_provider "github"
 otto config set pr.providers.github.token "$GITHUB_TOKEN"
 ```
+
+> **ADO Authentication:** Otto uses `az account get-access-token` to obtain Entra ID bearer tokens automatically. Tokens are cached and refreshed transparently. A PAT is only needed as a fallback if `az cli` is not available — set `OTTO_ADO_PAT` or `pr.providers.ado.pat` in that case.
 
 ### 2. Review a PR with guidance
 

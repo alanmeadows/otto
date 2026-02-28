@@ -177,32 +177,37 @@ The recipient sees the conversation streaming live — tool calls, responses, in
 To access the dashboard from your phone or share it with your team, use Azure DevTunnels with Entra ID authentication:
 
 ```bash
-# One-time setup: login to devtunnel with your Microsoft/Entra account
+# One-time setup: install devtunnel and login with your Microsoft account
+curl -sL https://aka.ms/DevTunnelCliInstall | bash
 devtunnel user login -e
+```
 
-# Start otto with tunnel
+Recommended configuration:
+
+```bash
+# Set your identity (so otto knows you're the owner)
+otto config set dashboard.owner_email "you@microsoft.com"
+
+# Use Entra tenant auth — any FTE can reach the URL, but only
+# you and your allowed_users list can access the dashboard
+otto config set dashboard.tunnel_access "tenant"
+
+# Persistent tunnel ID — gives you a stable URL across restarts
+otto config set dashboard.tunnel_id "yourname-otto"
+
+# Start the dashboard with tunnel
 otto server start --dashboard --tunnel
 ```
 
-Configure access control:
+Grant access to specific colleagues (live from the dashboard sidebar, or via config):
 
 ```bash
-# Default: only you can access (authenticated via Entra)
-otto config set dashboard.tunnel_access "authenticated"
-
-# Share with your Entra tenant (e.g. all @microsoft.com users)
-otto config set dashboard.tunnel_access "tenant"
-
-# Share with a GitHub org
-otto config set dashboard.tunnel_allow_org "my-github-org"
-
-# Use a persistent tunnel for a stable URL
-otto config set dashboard.tunnel_id "my-otto"
+otto config set dashboard.allowed_users '["alice@microsoft.com", "bob@microsoft.com"]'
 ```
 
-Access settings are also configurable from the dashboard sidebar under the Tunnel section.
+Users not in the allowed list get a 403 when accessing the dashboard through the tunnel. Session share links (`/shared/{token}`) bypass this — anyone with the link can view that specific session.
 
-> **Note:** The authentication provider (Entra vs GitHub) is determined by how you logged into the devtunnel CLI. Use `devtunnel user login -e` for Entra (Microsoft accounts), or `devtunnel user login -g` for GitHub accounts.
+> **Note:** The tunnel ID is a local label for persistence — the public URL is always a random subdomain (e.g. `https://0mwbqhhp-4098.usw3.devtunnels.ms`). The ID ensures the URL stays the same across restarts. Use `devtunnel user login -e` for Entra (Microsoft accounts) or `-g` for GitHub.
 
 ## Configuration
 

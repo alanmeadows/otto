@@ -88,7 +88,7 @@ otto pr review https://github.com/org/repo/pull/42 "focus on error handling and 
 otto pr review https://dev.azure.com/org/proj/_git/repo/pullrequest/123 "check for security issues in input validation"
 ```
 
-Otto fetches the diff, sends it to the LLM with your guidance, presents review comments in a table, and lets you interactively select which to post as inline comments on the PR.
+Otto checks out the PR branch locally, analyzes the codebase structure, and creates an LLM session rooted in the repo — so the agent can read any file for context, not just the diff. Your guidance steers its focus. It then presents review comments in a table and lets you interactively select which to post as inline comments on the PR.
 
 ### 3. Monitor a PR on autopilot
 

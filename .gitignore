@@ -42,6 +42,6 @@ go.work.sum
 vendor/
 
 # Otto runtime
-.otto/logs/
+.otto/
 demo.md
 *.png

@@ -113,6 +113,9 @@ func forkDaemon(port int, logDir string) error {
 	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
 		forkArgs = append(forkArgs, "--dashboard-port", v)
 	}
+	if os.Getenv("OTTO_VERBOSE") == "1" {
+		forkArgs = append(forkArgs, "-v")
+	}
 
 	cmd := exec.Command(os.Args[0], forkArgs...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}

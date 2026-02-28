@@ -85,6 +85,9 @@ or phone. Use --tunnel to expose the dashboard via Azure DevTunnels.`,
 			appConfig.Dashboard.AutoStartTunnel = true
 			os.Setenv("OTTO_TUNNEL", "1")
 		}
+		if verbose {
+			os.Setenv("OTTO_VERBOSE", "1")
+		}
 
 		return server.StartDaemon(port, logDir, foregroundFlag)
 	},

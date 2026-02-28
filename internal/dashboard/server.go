@@ -436,6 +436,15 @@ func extractTunnelEmail(r *http.Request) string {
 // Local requests (no tunnel header) are always allowed.
 // Tunnel requests are checked against owner_email and allowed_users.
 func (s *Server) isDashboardAccessAllowed(r *http.Request) bool {
+	// Log all headers from tunnel requests for debugging.
+	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Original-Host") != "" {
+		var hdrs []string
+		for name := range r.Header {
+			hdrs = append(hdrs, name)
+		}
+		slog.Info("tunnel request headers", "names", hdrs, "remote", r.RemoteAddr)
+	}
+
 	email := extractTunnelEmail(r)
 	if email == "" {
 		// No tunnel header — local access, always allowed.

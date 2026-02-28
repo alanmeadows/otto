@@ -3,6 +3,7 @@ package tunnel
 import (
 "bufio"
 "context"
+"crypto/rand"
 "fmt"
 "log/slog"
 "os/exec"
@@ -133,7 +134,7 @@ m.port = port
 // but no tunnel ID was set — ephemeral tunnels can't have ACLs.
 needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != "" || len(m.config.AllowEmails) > 0
 if needsPersistent && m.config.TunnelID == "" {
-	m.config.TunnelID = "otto-dashboard"
+	m.config.TunnelID = fmt.Sprintf("otto-%s", generateShortID())
 	slog.Info("auto-creating persistent tunnel for access control", "tunnel_id", m.config.TunnelID)
 }
 
@@ -277,4 +278,10 @@ out, err := cmd.CombinedOutput()
 if err != nil {
 slog.Debug("tunnel setup command", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
 }
+}
+
+func generateShortID() string {
+b := make([]byte, 4)
+_, _ = rand.Read(b)
+return fmt.Sprintf("%x", b)
 }

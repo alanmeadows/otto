@@ -1,5 +1,8 @@
 # Otto
 
+[![CI](https://github.com/alanmeadows/otto/actions/workflows/ci.yml/badge.svg)](https://github.com/alanmeadows/otto/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 AI-powered PR lifecycle manager with a Copilot session dashboard.
 
 ## Why Otto?
@@ -284,4 +287,4 @@ make all      # lint + vet + test + build
 
 ## License
 
-[MIT](LICENSE)
+[Apache 2.0](LICENSE)

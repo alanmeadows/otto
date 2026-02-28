@@ -9,7 +9,7 @@ import (
 	"sync"
 
 	"github.com/alanmeadows/otto/internal/copilot"
-	"nhooyr.io/websocket"
+	"github.com/coder/websocket"
 )
 
 // Bridge manages WebSocket connections and broadcasts session events to clients.

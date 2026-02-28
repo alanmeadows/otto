@@ -22,15 +22,14 @@ import (
 // Server is the dashboard HTTP server that serves the web UI,
 // REST API, and WebSocket bridge.
 type Server struct {
-	manager   *copilot.Manager
+	manager     *copilot.Manager
 	bridge      *Bridge
 	tunnelMgr   *tunnel.Manager
 	cfg         *config.Config
 	srv         *http.Server
-	mu          sync.Mutex
-	shareTokens   map[string]*ShareToken // token -> share info
-	tokenMu       sync.RWMutex
-	ListPRsFn     func() (any, error) // injected by server package to avoid import cycle
+	shareTokens map[string]*ShareToken // token -> share info
+	tokenMu     sync.RWMutex
+	ListPRsFn   func() (any, error) // injected by server package to avoid import cycle
 }
 
 // ShareToken represents a time-limited share link for a single session.

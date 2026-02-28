@@ -1,0 +1,22 @@
+linters:
+  enable:
+    - govet
+    - staticcheck
+    - unused
+    - ineffassign
+    - typecheck
+  disable:
+    - errcheck  # too noisy for now — many intentional ignores in daemon/tunnel code
+
+linters-settings:
+  staticcheck:
+    checks:
+      - all
+      - -QF1012  # WriteString(fmt.Sprintf) style — not worth fixing now
+      - -ST1005  # capitalized error strings — existing code uses them
+
+issues:
+  exclude-dirs:
+    - vendor
+  max-issues-per-linter: 0
+  max-same-issues: 0

@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/huh v0.8.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
+	github.com/coder/websocket v1.8.14
 	github.com/github/copilot-sdk/go v0.1.28
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/gofrs/flock v0.13.0
@@ -20,7 +21,6 @@ require (
 	golang.org/x/oauth2 v0.35.0
 	golang.org/x/term v0.39.0
 	gopkg.in/yaml.v3 v3.0.1
-	nhooyr.io/websocket v1.8.17
 )
 
 require (

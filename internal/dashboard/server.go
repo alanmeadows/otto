@@ -120,6 +120,36 @@ func NewServer(cfg *config.Config) *Server {
 			}()
 		}
 	}
+	bridge.onAddAllowedUser = func(email string) {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			return
+		}
+		for _, u := range cfg.Dashboard.AllowedUsers {
+			if strings.ToLower(u) == email {
+				return // already in list
+			}
+		}
+		cfg.Dashboard.AllowedUsers = append(cfg.Dashboard.AllowedUsers, email)
+		slog.Info("allowed user added", "email", email)
+	}
+	bridge.onRemoveAllowedUser = func(email string) {
+		email = strings.ToLower(strings.TrimSpace(email))
+		filtered := make([]string, 0, len(cfg.Dashboard.AllowedUsers))
+		for _, u := range cfg.Dashboard.AllowedUsers {
+			if strings.ToLower(u) != email {
+				filtered = append(filtered, u)
+			}
+		}
+		cfg.Dashboard.AllowedUsers = filtered
+		slog.Info("allowed user removed", "email", email)
+	}
+	bridge.onGetAllowedUsers = func() AllowedUsersListPayload {
+		return AllowedUsersListPayload{
+			OwnerEmail: cfg.Dashboard.OwnerEmail,
+			Users:      cfg.Dashboard.AllowedUsers,
+		}
+	}
 
 	return s
 }

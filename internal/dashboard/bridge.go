@@ -21,7 +21,10 @@ type Bridge struct {
 	onStartTunnel     func()
 	onStopTunnel      func()
 	onListWorktrees   func() []WorktreeSummary
-	onSetTunnelConfig func(SetTunnelConfigPayload)
+	onSetTunnelConfig   func(SetTunnelConfigPayload)
+	onAddAllowedUser    func(string)
+	onRemoveAllowedUser func(string)
+	onGetAllowedUsers   func() AllowedUsersListPayload
 }
 
 type wsClient struct {
@@ -65,6 +68,7 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	// Send initial state.
 	b.sendSessionsList(client)
 	b.sendPersistedSessions(client)
+	b.sendAllowedUsers(client)
 
 	// Read loop — handle client commands.
 	b.readLoop(ctx, id, client)
@@ -237,6 +241,29 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 		if b.onSetTunnelConfig != nil {
 			b.onSetTunnelConfig(p)
 		}
+
+	case MsgAddAllowedUser:
+		var p AllowedUserPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if b.onAddAllowedUser != nil {
+			b.onAddAllowedUser(p.Email)
+			b.broadcastAllowedUsers()
+		}
+
+	case MsgRemoveAllowedUser:
+		var p AllowedUserPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if b.onRemoveAllowedUser != nil {
+			b.onRemoveAllowedUser(p.Email)
+			b.broadcastAllowedUsers()
+		}
+
+	case MsgGetAllowedUsers:
+		b.sendAllowedUsers(client)
 	}
 }
 
@@ -348,6 +375,18 @@ func (b *Bridge) broadcastPersistedSessions() {
 	b.broadcast(MsgPersistedSessionsList, PersistedSessionsListPayload{
 		Sessions: summaries,
 	})
+}
+
+func (b *Bridge) sendAllowedUsers(client *wsClient) {
+	if b.onGetAllowedUsers != nil {
+		b.sendTo(client, MsgAllowedUsersList, b.onGetAllowedUsers())
+	}
+}
+
+func (b *Bridge) broadcastAllowedUsers() {
+	if b.onGetAllowedUsers != nil {
+		b.broadcast(MsgAllowedUsersList, b.onGetAllowedUsers())
+	}
 }
 
 func (b *Bridge) broadcastSessionsList() {

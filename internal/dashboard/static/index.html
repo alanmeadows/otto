@@ -52,22 +52,31 @@
                         <details class="tunnel-settings">
                             <summary>Access Settings</summary>
                             <div class="form-group">
-                                <label for="tunnel-access-mode">Access</label>
+                                <label for="tunnel-access-mode">Tunnel Auth</label>
                                 <select id="tunnel-access-mode" onchange="updateTunnelAccessFields()">
-                                    <option value="">Authenticated (owner only)</option>
-                                    <option value="tenant">Entra Tenant (all @your-org.com)</option>
+                                    <option value="tenant">Entra ID (recommended)</option>
+                                    <option value="">Owner only</option>
                                     <option value="anonymous">Anonymous (public)</option>
                                 </select>
                             </div>
                             <div class="form-group" id="tunnel-org-group">
-                                <label for="tunnel-allow-org">Allow GitHub Org</label>
+                                <label for="tunnel-allow-org">GitHub Org</label>
                                 <input id="tunnel-allow-org" type="text" placeholder="e.g. microsoft">
                             </div>
                             <div class="form-group">
                                 <label for="tunnel-id">Tunnel ID</label>
-                                <input id="tunnel-id" type="text" placeholder="e.g. otto-dashboard">
+                                <input id="tunnel-id" type="text" placeholder="e.g. my-otto">
                             </div>
                             <button id="save-tunnel-settings" class="btn btn-sm" style="margin-top:4px">Save & Apply</button>
+                        </details>
+                        <details class="tunnel-settings">
+                            <summary>Allowed Users</summary>
+                            <div class="allowed-users-hint">Only these users can access the full dashboard. Share links bypass this.</div>
+                            <div id="allowed-users-list"></div>
+                            <div class="allowed-users-add">
+                                <input id="add-user-email" type="email" placeholder="user@microsoft.com">
+                                <button id="add-user-btn" class="small-btn">Add</button>
+                            </div>
                         </details>
                         <div class="tunnel-actions">
                             <button id="start-tunnel-btn" class="btn btn-sm">Start Tunnel</button>

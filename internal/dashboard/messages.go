@@ -61,6 +61,14 @@ const (
 	MsgStopTunnel           = "stop_tunnel"
 	MsgGetPersistedSessions = "get_persisted_sessions"
 	MsgSetTunnelConfig      = "set_tunnel_config"
+	MsgAddAllowedUser       = "add_allowed_user"
+	MsgRemoveAllowedUser    = "remove_allowed_user"
+	MsgGetAllowedUsers      = "get_allowed_users"
+)
+
+// Server → Client
+const (
+	MsgAllowedUsersList = "allowed_users_list"
 )
 
 // ---------------------------------------------------------------------------
@@ -194,4 +202,13 @@ type SetTunnelConfigPayload struct {
 	TunnelID  string `json:"tunnel_id"`
 	Access    string `json:"access"`
 	AllowOrg  string `json:"allow_org"`
+}
+
+type AllowedUserPayload struct {
+	Email string `json:"email"`
+}
+
+type AllowedUsersListPayload struct {
+	OwnerEmail string   `json:"owner_email"`
+	Users      []string `json:"users"`
 }

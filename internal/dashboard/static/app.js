@@ -92,6 +92,7 @@ function handleMessage(msg) {
         case 'worktrees_list': handleWorktreesList(msg.payload); break;
         case 'persisted_sessions_list': handlePersistedSessionsList(msg.payload); break;
         case 'reasoning_delta': handleReasoningDelta(msg.payload); break;
+        case 'allowed_users_list': handleAllowedUsersList(msg.payload); break;
     }
 }
 
@@ -556,8 +557,35 @@ function sendMessage() {
 function updateTunnelAccessFields() {
     const mode = document.getElementById('tunnel-access-mode').value;
     const orgGroup = document.getElementById('tunnel-org-group');
-    // GitHub Org field only makes sense for authenticated mode (not tenant or anonymous)
     orgGroup.classList.toggle('hidden', mode !== '');
+}
+
+function handleAllowedUsersList(payload) {
+    const container = document.getElementById('allowed-users-list');
+    container.innerHTML = '';
+    if (payload.owner_email) {
+        const ownerEl = document.createElement('div');
+        ownerEl.className = 'allowed-user-item';
+        ownerEl.innerHTML = '<span>' + esc(payload.owner_email) + ' <em style="color:var(--text-muted)">(owner)</em></span>';
+        container.appendChild(ownerEl);
+    }
+    (payload.users || []).forEach(function(email) {
+        const el = document.createElement('div');
+        el.className = 'allowed-user-item';
+        el.innerHTML = '<span>' + esc(email) + '</span><span class="remove-user" title="Remove">✕</span>';
+        el.querySelector('.remove-user').onclick = function() {
+            send('remove_allowed_user', { email: email });
+        };
+        container.appendChild(el);
+    });
+}
+
+function addAllowedUser() {
+    const input = document.getElementById('add-user-email');
+    const email = input.value.trim();
+    if (!email) return;
+    send('add_allowed_user', { email: email });
+    input.value = '';
 }
 
 function shareSession() {
@@ -638,6 +666,12 @@ document.addEventListener('DOMContentLoaded', () => {
             allow_org: document.getElementById('tunnel-allow-org').value.trim(),
         });
         alert('Tunnel settings saved. Restart tunnel to apply.');
+    });
+
+    // Allowed users
+    document.getElementById('add-user-btn').addEventListener('click', addAllowedUser);
+    document.getElementById('add-user-email').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); addAllowedUser(); }
     });
 
     // Escape to close modal

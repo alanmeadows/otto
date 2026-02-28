@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	sdk "github.com/github/copilot-sdk/go"
 )
@@ -93,7 +94,12 @@ func (c *CopilotClient) SendPrompt(ctx context.Context, sessionID string, prompt
 
 	slog.Debug("sending prompt via copilot SDK", "session", sessionID)
 
-	resp, err := session.SendAndWait(ctx, sdk.MessageOptions{
+	// Use a 10-minute timeout for LLM prompts — code reviews and complex
+	// tasks can take several minutes with tool execution.
+	promptCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+
+	resp, err := session.SendAndWait(promptCtx, sdk.MessageOptions{
 		Prompt: prompt,
 	})
 	if err != nil {

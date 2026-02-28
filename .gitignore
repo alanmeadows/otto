@@ -44,4 +44,6 @@ vendor/
 # Otto runtime
 .otto/
 demo.md
-*.png
+# Ignore showboat screenshot artifacts in root, but keep docs/images/
+/*.png
+!docs/images/*.png

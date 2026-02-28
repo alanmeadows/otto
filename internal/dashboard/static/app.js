@@ -623,6 +623,16 @@ document.addEventListener('DOMContentLoaded', () => {
         navigator.clipboard.writeText(url).catch(() => {});
     });
 
+    // Tunnel settings
+    document.getElementById('save-tunnel-settings').addEventListener('click', () => {
+        send('set_tunnel_config', {
+            tunnel_id: document.getElementById('tunnel-id').value.trim(),
+            access: document.getElementById('tunnel-access-mode').value,
+            allow_org: document.getElementById('tunnel-allow-org').value.trim(),
+        });
+        alert('Tunnel settings saved. Restart tunnel to apply.');
+    });
+
     // Escape to close modal
     document.addEventListener('keydown', (e) => {
         if (e.key === 'Escape') hideNewSessionDialog();

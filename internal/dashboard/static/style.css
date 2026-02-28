@@ -441,6 +441,21 @@ body {
 .tunnel-info { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .tunnel-label { color: var(--text-muted); }
 .tunnel-actions { display: flex; gap: 8px; }
+.tunnel-settings {
+    margin: 8px 0;
+    font-size: 12px;
+}
+.tunnel-settings summary {
+    cursor: pointer;
+    color: var(--text-secondary);
+    font-size: 11px;
+    margin-bottom: 6px;
+}
+.tunnel-settings .form-group { margin-bottom: 6px; }
+.tunnel-settings input, .tunnel-settings select {
+    font-size: 12px;
+    padding: 4px 8px;
+}
 #tunnel-url-display {
     display: flex; gap: 4px; align-items: center;
     margin-bottom: 8px;

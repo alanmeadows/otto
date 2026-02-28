@@ -18,9 +18,10 @@ type Bridge struct {
 	clients       map[string]*wsClient
 	mu            sync.RWMutex
 	nextID        int
-	onStartTunnel func()
-	onStopTunnel  func()
-	onListWorktrees func() []WorktreeSummary
+	onStartTunnel     func()
+	onStopTunnel      func()
+	onListWorktrees   func() []WorktreeSummary
+	onSetTunnelConfig func(SetTunnelConfigPayload)
 }
 
 type wsClient struct {
@@ -226,6 +227,15 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 	case MsgStopTunnel:
 		if b.onStopTunnel != nil {
 			b.onStopTunnel()
+		}
+
+	case MsgSetTunnelConfig:
+		var p SetTunnelConfigPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		if b.onSetTunnelConfig != nil {
+			b.onSetTunnelConfig(p)
 		}
 	}
 }

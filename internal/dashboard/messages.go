@@ -60,6 +60,7 @@ const (
 	MsgStartTunnel          = "start_tunnel"
 	MsgStopTunnel           = "stop_tunnel"
 	MsgGetPersistedSessions = "get_persisted_sessions"
+	MsgSetTunnelConfig      = "set_tunnel_config"
 )
 
 // ---------------------------------------------------------------------------
@@ -187,4 +188,10 @@ type ResumeSessionPayload struct {
 
 type CloseSessionPayload struct {
 	SessionName string `json:"session_name"`
+}
+
+type SetTunnelConfigPayload struct {
+	TunnelID  string `json:"tunnel_id"`
+	Access    string `json:"access"`
+	AllowOrg  string `json:"allow_org"`
 }

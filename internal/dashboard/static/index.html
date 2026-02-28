@@ -49,6 +49,26 @@
                             <input id="tunnel-url-input" type="text" readonly>
                             <button id="copy-tunnel-url" class="small-btn">Copy</button>
                         </div>
+                        <details class="tunnel-settings">
+                            <summary>Access Settings</summary>
+                            <div class="form-group">
+                                <label for="tunnel-access-mode">Access</label>
+                                <select id="tunnel-access-mode">
+                                    <option value="">Authenticated (owner only)</option>
+                                    <option value="tenant">Entra Tenant</option>
+                                    <option value="anonymous">Anonymous (public)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label for="tunnel-allow-org">Allow GitHub Org</label>
+                                <input id="tunnel-allow-org" type="text" placeholder="e.g. microsoft">
+                            </div>
+                            <div class="form-group">
+                                <label for="tunnel-id">Tunnel ID</label>
+                                <input id="tunnel-id" type="text" placeholder="e.g. otto-dashboard">
+                            </div>
+                            <button id="save-tunnel-settings" class="btn btn-sm" style="margin-top:4px">Save & Apply</button>
+                        </details>
                         <div class="tunnel-actions">
                             <button id="start-tunnel-btn" class="btn btn-sm">Start Tunnel</button>
                             <button id="stop-tunnel-btn" class="btn btn-sm btn-danger hidden">Stop Tunnel</button>

@@ -95,6 +95,30 @@ func NewServer(cfg *config.Config) *Server {
 	bridge.onListWorktrees = func() []WorktreeSummary {
 		return s.listWorktrees()
 	}
+	bridge.onSetTunnelConfig = func(p SetTunnelConfigPayload) {
+		// Update the tunnel manager's config.
+		tmgr.UpdateConfig(tunnel.Config{
+			TunnelID: p.TunnelID,
+			Access:   p.Access,
+			AllowOrg: p.AllowOrg,
+		})
+		// Also persist to otto config file.
+		cfg.Dashboard.TunnelID = p.TunnelID
+		cfg.Dashboard.TunnelAccess = p.Access
+		cfg.Dashboard.TunnelAllowOrg = p.AllowOrg
+		slog.Info("tunnel config updated", "tunnel_id", p.TunnelID, "access", p.Access, "allow_org", p.AllowOrg)
+		// If tunnel is running, restart it with new config.
+		if running, _ := tmgr.Status(); running {
+			go func() {
+				tmgr.Stop()
+				port := cfg.Dashboard.Port
+				if port == 0 {
+					port = 4098
+				}
+				tmgr.Start(context.Background(), port)
+			}()
+		}
+	}
 
 	return s
 }

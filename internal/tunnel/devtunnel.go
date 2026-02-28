@@ -56,6 +56,13 @@ _, err := exec.LookPath("devtunnel")
 return err == nil
 }
 
+// UpdateConfig replaces the tunnel configuration. Takes effect on next Start().
+func (m *Manager) UpdateConfig(cfg Config) {
+m.mu.Lock()
+defer m.mu.Unlock()
+m.config = cfg
+}
+
 // IsLoggedIn checks whether the current user is logged in to devtunnel.
 func (m *Manager) IsLoggedIn() (bool, error) {
 cmd := exec.Command("devtunnel", "user", "show")
@@ -121,6 +128,14 @@ return nil
 ctx, cancel := context.WithCancel(ctx)
 m.cancel = cancel
 m.port = port
+
+// Auto-create a persistent tunnel if access control is configured
+// but no tunnel ID was set — ephemeral tunnels can't have ACLs.
+needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != "" || len(m.config.AllowEmails) > 0
+if needsPersistent && m.config.TunnelID == "" {
+	m.config.TunnelID = "otto-dashboard"
+	slog.Info("auto-creating persistent tunnel for access control", "tunnel_id", m.config.TunnelID)
+}
 
 if m.config.TunnelID != "" {
 if err := m.ensurePersistentTunnel(port); err != nil {
@@ -218,14 +233,25 @@ return nil
 
 cancel := m.cancel
 cmd := m.cmd
+m.running = false
+m.url = ""
+m.cmd = nil
+cb := m.onStatusChange
 m.mu.Unlock()
 
+// Cancel context — this sends SIGKILL via exec.CommandContext.
 if cancel != nil {
 cancel()
 }
 
-if cmd != nil {
-_ = cmd.Wait()
+// Also try explicit kill in case context cancellation isn't enough.
+if cmd != nil && cmd.Process != nil {
+cmd.Process.Kill()
+}
+
+slog.Info("devtunnel stopped")
+if cb != nil {
+cb(false, "")
 }
 
 return nil

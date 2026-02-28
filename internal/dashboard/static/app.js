@@ -446,29 +446,103 @@ function scrollToBottom() {
 
 function renderMarkdown(text) {
     if (!text) return '';
-    let html = esc(text);
 
-    // Code blocks
-    html = html.replace(/```(\w*)\n([\s\S]*?)```/g, (_, lang, code) =>
-        `<pre><code class="language-${lang}">${code}</code></pre>`
-    );
+    // First, extract fenced code blocks to protect them from further processing.
+    var codeBlocks = [];
+    text = text.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        var idx = codeBlocks.length;
+        codeBlocks.push('<pre class="code-block"><div class="code-lang">' + esc(lang || 'text') + '</div><code>' + esc(code) + '</code></pre>');
+        return '\x00CODEBLOCK' + idx + '\x00';
+    });
 
-    // Inline code
-    html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Process blocks line by line.
+    var lines = text.split('\n');
+    var result = [];
+    var inList = false;
 
+    for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
+
+        // Code block placeholder
+        var cbMatch = line.match(/^\x00CODEBLOCK(\d+)\x00$/);
+        if (cbMatch) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push(codeBlocks[parseInt(cbMatch[1])]);
+            continue;
+        }
+
+        // Headers
+        if (/^#### (.+)/.test(line)) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push('<h4>' + inlineMarkdown(line.replace(/^#### /, '')) + '</h4>');
+            continue;
+        }
+        if (/^### (.+)/.test(line)) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push('<h3>' + inlineMarkdown(line.replace(/^### /, '')) + '</h3>');
+            continue;
+        }
+        if (/^## (.+)/.test(line)) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push('<h2>' + inlineMarkdown(line.replace(/^## /, '')) + '</h2>');
+            continue;
+        }
+        if (/^# (.+)/.test(line)) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push('<h1>' + inlineMarkdown(line.replace(/^# /, '')) + '</h1>');
+            continue;
+        }
+
+        // Unordered list items
+        if (/^[\-\*] (.+)/.test(line)) {
+            if (!inList) { result.push('<ul>'); inList = true; }
+            result.push('<li>' + inlineMarkdown(line.replace(/^[\-\*] /, '')) + '</li>');
+            continue;
+        }
+
+        // Ordered list items
+        if (/^\d+\. (.+)/.test(line)) {
+            if (!inList) { result.push('<ol>'); inList = true; }
+            result.push('<li>' + inlineMarkdown(line.replace(/^\d+\. /, '')) + '</li>');
+            continue;
+        }
+
+        // Blockquote
+        if (/^> (.+)/.test(line)) {
+            if (inList) { result.push('</ul>'); inList = false; }
+            result.push('<blockquote>' + inlineMarkdown(line.replace(/^> /, '')) + '</blockquote>');
+            continue;
+        }
+
+        // End list if we hit a non-list line
+        if (inList) { result.push('</ul>'); inList = false; }
+
+        // Empty line = paragraph break
+        if (line.trim() === '') {
+            result.push('<div class="md-spacer"></div>');
+            continue;
+        }
+
+        // Regular text
+        result.push('<p>' + inlineMarkdown(line) + '</p>');
+    }
+    if (inList) result.push('</ul>');
+
+    return result.join('');
+}
+
+// Inline markdown processing (bold, italic, code, links)
+function inlineMarkdown(text) {
+    var h = esc(text);
+    // Inline code (must be before bold/italic to avoid conflicts)
+    h = h.replace(/`([^`]+)`/g, '<code class="inline-code">$1</code>');
     // Bold
-    html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
+    h = h.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
     // Italic
-    html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
+    h = h.replace(/\*([^*]+)\*/g, '<em>$1</em>');
     // Links
-    html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
-
-    // Line breaks
-    html = html.replace(/\n/g, '<br>');
-
-    return html;
+    h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+    return h;
 }
 
 function esc(str) {
@@ -582,21 +656,58 @@ function addAllowedUser() {
 
 function shareSession() {
     if (!state.activeSession) return;
+
+    // Build a simple share dialog inline.
+    var mode = 'readonly';
+    var dur = 60;
+    var html = '<div style="background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:380px;margin:auto;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:200">';
+    html += '<h3 style="margin:0 0 12px;font-size:15px">Share Session</h3>';
+    html += '<div style="margin-bottom:10px"><label style="font-size:12px;color:var(--text-secondary)">Mode</label><br>';
+    html += '<select id="share-mode" style="width:100%;padding:6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px">';
+    html += '<option value="readonly">🔒 Read-only (view only)</option>';
+    html += '<option value="readwrite">✏️ Read-write (can send prompts)</option>';
+    html += '</select></div>';
+    html += '<div style="margin-bottom:12px"><label style="font-size:12px;color:var(--text-secondary)">Expires in</label><br>';
+    html += '<select id="share-duration" style="width:100%;padding:6px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:4px;color:var(--text-primary);font-size:13px">';
+    html += '<option value="15">15 minutes</option>';
+    html += '<option value="60" selected>1 hour</option>';
+    html += '<option value="240">4 hours</option>';
+    html += '<option value="1440">24 hours</option>';
+    html += '</select></div>';
+    html += '<div style="display:flex;gap:8px;justify-content:flex-end">';
+    html += '<button onclick="this.closest(\'div\').parentElement.remove();document.getElementById(\'share-backdrop\')?.remove()" class="btn">Cancel</button>';
+    html += '<button onclick="doShare()" class="btn btn-primary">Create Link</button>';
+    html += '</div></div>';
+    html += '<div id="share-backdrop" onclick="document.getElementById(\'share-dialog\')?.remove();this.remove()" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:199"></div>';
+
+    var container = document.createElement('div');
+    container.id = 'share-dialog';
+    container.innerHTML = html;
+    document.body.appendChild(container);
+}
+
+function doShare() {
+    var mode = document.getElementById('share-mode').value;
+    var dur = parseInt(document.getElementById('share-duration').value);
+    document.getElementById('share-dialog')?.remove();
+    document.getElementById('share-backdrop')?.remove();
+
     fetch('/api/share', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_name: state.activeSession, duration_min: 60 })
+        body: JSON.stringify({ session_name: state.activeSession, duration_min: dur, mode: mode })
     })
-    .then(r => r.json())
-    .then(data => {
-        const fullUrl = location.origin + data.url;
-        navigator.clipboard.writeText(fullUrl).then(() => {
-            alert('Share link copied to clipboard!\n\nExpires: ' + new Date(data.expires).toLocaleTimeString() + '\n\n' + fullUrl);
-        }).catch(() => {
-            prompt('Share link (expires in 1 hour):', fullUrl);
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+        var fullUrl = location.origin + data.url;
+        var modeLabel = data.mode === 'readwrite' ? '✏️ Read-write' : '🔒 Read-only';
+        navigator.clipboard.writeText(fullUrl).then(function() {
+            alert(modeLabel + ' share link copied!\n\nExpires: ' + new Date(data.expires).toLocaleTimeString() + '\n\n' + fullUrl);
+        }).catch(function() {
+            prompt(modeLabel + ' share link:', fullUrl);
         });
     })
-    .catch(err => alert('Failed to create share link: ' + err));
+    .catch(function(err) { alert('Failed: ' + err); });
 }
 
 // --- Event Listeners ---

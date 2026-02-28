@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{TITLE}} — Otto Shared Session</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: var(--bg-primary); color: var(--text-primary); }
+  #shared-app { display: flex; flex-direction: column; height: 100vh; }
+  #shared-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 10px 16px; background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  #shared-header h2 { font-size: 14px; margin: 0; }
+  #shared-header .meta { font-size: 11px; color: var(--text-muted); }
+  #shared-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .footer-notice {
+    text-align: center; font-size: 12px; color: var(--text-muted);
+    padding: 8px; border-top: 1px solid var(--border); background: var(--bg-secondary);
+  }
+  #nickname-overlay {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 300;
+    background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center;
+  }
+  #nickname-box {
+    background: var(--bg-secondary); border: 1px solid var(--border);
+    border-radius: 12px; padding: 28px; max-width: 340px; width: 90%;
+    text-align: center;
+  }
+  #nickname-box h3 { margin: 0 0 8px; font-size: 16px; }
+  #nickname-box p { font-size: 12px; color: var(--text-secondary); margin: 0 0 16px; }
+  #nickname-input {
+    width: 100%; padding: 10px 14px; background: var(--bg-tertiary);
+    border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary);
+    font-size: 15px; text-align: center; outline: none; box-sizing: border-box;
+  }
+  #nickname-input:focus { border-color: var(--accent); }
+  #nickname-btn { margin-top: 14px; padding: 8px 24px; }
+  #shared-input-area {
+    display: flex; align-items: flex-end; gap: 8px;
+    padding: 10px 16px; border-top: 1px solid var(--border); background: var(--bg-secondary);
+  }
+  #shared-input {
+    flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border);
+    border-radius: 8px; padding: 8px 12px; color: var(--text-primary);
+    font-size: 14px; font-family: inherit; resize: none; max-height: 100px; outline: none;
+  }
+  #shared-input:focus { border-color: var(--accent); }
+  .message-sender { font-size: 11px; font-weight: 600; margin-bottom: 3px; }
+  .message-sender.owner { color: var(--accent); }
+  .message-sender.guest { color: var(--orange); }
+</style>
+</head>
+<body>
+<div id="shared-app">
+  <div id="shared-header">
+    <h2>📡 <span id="session-title"></span></h2>
+    <span class="meta"><span id="mode-label"></span> · Expires in <span id="expires"></span></span>
+  </div>
+  <div id="shared-messages"></div>
+  <div id="shared-input-area" style="display:none">
+    <textarea id="shared-input" placeholder="Send a message..." rows="1"></textarea>
+    <button id="shared-send" class="btn btn-primary" disabled>Send</button>
+  </div>
+  <div id="readonly-notice" class="footer-notice" style="display:none">Read-only shared view</div>
+</div>
+
+<div id="nickname-overlay" style="display:none">
+  <div id="nickname-box">
+    <h3>👋 Join Session</h3>
+    <p>Enter a nickname so others know who's talking</p>
+    <input id="nickname-input" type="text" placeholder="Your name" maxlength="20" autocomplete="off">
+    <br><button id="nickname-btn" class="btn btn-primary" onclick="setNickname()">Join</button>
+  </div>
+</div>
+
+<script>
+var SHARE_CONFIG = {{CONFIG_JSON}};
+var NICKNAME = '';
+var ws = null;
+
+document.getElementById('session-title').textContent = SHARE_CONFIG.session;
+document.getElementById('mode-label').textContent = SHARE_CONFIG.mode_label;
+document.getElementById('expires').textContent = SHARE_CONFIG.expires;
+
+if (SHARE_CONFIG.mode === 'readwrite') {
+  document.getElementById('nickname-overlay').style.display = 'flex';
+} else {
+  document.getElementById('readonly-notice').style.display = '';
+  startWS();
+}
+
+function setNickname() {
+  var n = document.getElementById('nickname-input').value.trim();
+  if (!n) return;
+  NICKNAME = n;
+  document.getElementById('nickname-overlay').style.display = 'none';
+  document.getElementById('shared-input-area').style.display = 'flex';
+  startWS();
+}
+
+document.getElementById('nickname-input').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') { e.preventDefault(); setNickname(); }
+});
+
+function startWS() {
+  var proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host + '/ws/shared/' + SHARE_CONFIG.token);
+
+  ws.onmessage = function(evt) {
+    try {
+      var msg = JSON.parse(evt.data);
+      handleMsg(msg);
+    } catch(e) {}
+  };
+
+  // Wire input controls for readwrite.
+  if (SHARE_CONFIG.mode === 'readwrite') {
+    var input = document.getElementById('shared-input');
+    var btn = document.getElementById('shared-send');
+    input.addEventListener('input', function() { btn.disabled = !input.value.trim(); });
+    input.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendSharedMsg(); }
+    });
+    btn.addEventListener('click', sendSharedMsg);
+  }
+}
+
+function sendSharedMsg() {
+  var input = document.getElementById('shared-input');
+  var prompt = input.value.trim();
+  if (!prompt || !ws) return;
+  // Prefix with nickname so everyone sees who sent it.
+  var prefixed = NICKNAME + ': ' + prompt;
+  ws.send(JSON.stringify({type:'send_message', payload:{session_name: SHARE_CONFIG.session, prompt: prefixed}}));
+  input.value = '';
+  document.getElementById('shared-send').disabled = true;
+}
+
+function handleMsg(msg) {
+  var container = document.getElementById('shared-messages');
+  switch(msg.type) {
+    case 'session_history':
+      container.innerHTML = '';
+      (msg.payload.messages || []).forEach(function(m) {
+        if (!m.content || !m.content.trim()) return;
+        appendMsg(m.role, m.content);
+      });
+      break;
+    case 'content_delta':
+      if (!document.getElementById('streaming')) {
+        appendMsg('assistant', '', true);
+      }
+      var el = document.getElementById('streaming');
+      if (el) { el.querySelector('.msg-body').innerHTML += esc(msg.payload.content); }
+      break;
+    case 'user_message':
+      appendMsg('user', msg.payload.content);
+      break;
+    case 'turn_end':
+      var s = document.getElementById('streaming');
+      if (s) s.id = '';
+      ws.send(JSON.stringify({type:'get_history',payload:{session_name:SHARE_CONFIG.session}}));
+      break;
+    case 'tool_started':
+      var tool = document.createElement('div');
+      tool.className = 'tool-indicator running';
+      tool.id = 'tool-' + msg.payload.call_id;
+      var detail = '';
+      try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.path||a.command||a.pattern||''; } catch(e){}
+      if (detail.length > 50) detail = detail.substring(0,47)+'...';
+      tool.innerHTML = '⏳ <span class="tool-name">' + esc(msg.payload.tool_name) + (detail ? ': '+esc(detail) : '') + '</span>';
+      container.appendChild(tool);
+      container.scrollTop = container.scrollHeight;
+      break;
+    case 'tool_completed':
+      var te = document.getElementById('tool-' + msg.payload.call_id);
+      if (te) {
+        te.className = 'tool-indicator ' + (msg.payload.success?'completed':'failed');
+        var icon = msg.payload.success ? '✅' : '❌';
+        te.innerHTML = icon + ' ' + te.querySelector('.tool-name').outerHTML;
+      }
+      break;
+  }
+  container.scrollTop = container.scrollHeight;
+}
+
+function appendMsg(role, content, streaming) {
+  var div = document.createElement('div');
+  div.className = 'message ' + role;
+  if (streaming) div.id = 'streaming';
+
+  var html = '';
+  // Parse sender prefix for user messages (e.g. "alan: tell me a joke")
+  if (role === 'user' && content.indexOf(': ') > 0 && content.indexOf(': ') < 20) {
+    var parts = content.split(': ');
+    var sender = parts.shift();
+    var body = parts.join(': ');
+    html = '<div class="message-sender guest">' + esc(sender) + '</div>';
+    html += '<div class="msg-body">' + renderMd(body) + '</div>';
+  } else {
+    html = '<div class="msg-body">' + renderMd(content) + '</div>';
+  }
+  div.innerHTML = html;
+  document.getElementById('shared-messages').appendChild(div);
+}
+
+function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+
+function renderMd(t) {
+  if(!t) return '';
+  // Extract code blocks first.
+  var blocks = [];
+  t = t.replace(/```(\w*)\n([\s\S]*?)```/g, function(_,l,c) {
+    var idx = blocks.length;
+    blocks.push('<pre class="code-block"><div class="code-lang">'+esc(l||'text')+'</div><code>'+esc(c)+'</code></pre>');
+    return '\x00CB'+idx+'\x00';
+  });
+  var lines = t.split('\n');
+  var out = [];
+  for (var i=0; i<lines.length; i++) {
+    var ln = lines[i];
+    var cb = ln.match(/^\x00CB(\d+)\x00$/);
+    if (cb) { out.push(blocks[parseInt(cb[1])]); continue; }
+    if (/^#{1,4} /.test(ln)) { var lvl=ln.match(/^(#+)/)[1].length; out.push('<h'+lvl+'>'+inlineMd(ln.replace(/^#+\s/,''))+'</h'+lvl+'>'); continue; }
+    if (/^[\-\*] /.test(ln)) { out.push('<li>'+inlineMd(ln.replace(/^[\-\*] /,''))+'</li>'); continue; }
+    if (ln.trim()==='') { out.push('<div class="md-spacer"></div>'); continue; }
+    out.push('<p>'+inlineMd(ln)+'</p>');
+  }
+  return out.join('');
+}
+function inlineMd(t) {
+  var h=esc(t);
+  h=h.replace(/`([^`]+)`/g,'<code class="inline-code">$1</code>');
+  h=h.replace(/\*\*([^*]+)\*\*/g,'<strong>$1</strong>');
+  h=h.replace(/\*([^*]+)\*/g,'<em>$1</em>');
+  h=h.replace(/\[([^\]]+)\]\(([^)]+)\)/g,'<a href="$2" target="_blank" rel="noopener">$1</a>');
+  return h;
+}
+</script>
+</body>
+</html>

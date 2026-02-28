@@ -32,6 +32,7 @@ type wsClient struct {
 	ctx           context.Context
 	mu            sync.Mutex // serializes writes
 	sessionFilter string     // if set, only receive events for this session (shared view)
+	readOnly      bool       // if true, can't send prompts
 }
 
 // NewBridge creates a Bridge wired to the given copilot Manager.
@@ -75,7 +76,7 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleSharedWS is the HTTP handler for /ws/shared/{token} — read-only, single session.
-func (b *Bridge) HandleSharedWS(w http.ResponseWriter, r *http.Request, sessionName string) {
+func (b *Bridge) HandleSharedWS(w http.ResponseWriter, r *http.Request, sessionName string, mode string) {
 	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		InsecureSkipVerify: true,
 	})
@@ -88,11 +89,11 @@ func (b *Bridge) HandleSharedWS(w http.ResponseWriter, r *http.Request, sessionN
 	b.mu.Lock()
 	b.nextID++
 	id := fmt.Sprintf("shared-%d", b.nextID)
-	client := &wsClient{conn: c, ctx: ctx, sessionFilter: sessionName}
+	client := &wsClient{conn: c, ctx: ctx, sessionFilter: sessionName, readOnly: mode != "readwrite"}
 	b.clients[id] = client
 	b.mu.Unlock()
 
-	slog.Info("shared websocket client connected", "id", id, "session", sessionName, "remote", r.RemoteAddr)
+	slog.Info("shared websocket client connected", "id", id, "session", sessionName, "mode", mode, "remote", r.RemoteAddr)
 
 	// Send the session history immediately.
 	history, err := b.manager.GetHistory(sessionName)
@@ -110,7 +111,6 @@ func (b *Bridge) HandleSharedWS(w http.ResponseWriter, r *http.Request, sessionN
 		})
 	}
 
-	// Read loop — only accept get_history, ignore everything else (read-only).
 	b.readLoop(ctx, id, client)
 }
 
@@ -163,13 +163,21 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 		})
 
 	case MsgSendMessage:
+		if client.readOnly {
+			return // read-only shared clients can't send prompts
+		}
 		var p SendMessagePayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {
 			return
 		}
+		// For shared clients, use their session filter as the target.
+		sessionName := p.SessionName
+		if client.sessionFilter != "" {
+			sessionName = client.sessionFilter
+		}
 		go func() {
-			if err := b.manager.SendPrompt(ctx, p.SessionName, p.Prompt); err != nil {
-				slog.Warn("send prompt failed", "session", p.SessionName, "error", err)
+			if err := b.manager.SendPrompt(ctx, sessionName, p.Prompt); err != nil {
+				slog.Warn("send prompt failed", "session", sessionName, "error", err)
 			}
 		}()
 

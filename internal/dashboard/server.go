@@ -39,6 +39,7 @@ type ShareToken struct {
 	SessionID   string    `json:"session_id"`
 	ExpiresAt   time.Time `json:"expires_at"`
 	CreatedAt   time.Time `json:"created_at"`
+	Mode        string    `json:"mode"` // "readonly" or "readwrite"
 }
 
 // NewServer creates a dashboard server with all subsystems.
@@ -534,6 +535,7 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		SessionName string `json:"session_name"`
 		DurationMin int    `json:"duration_min"` // 0 = default 60 minutes
+		Mode        string `json:"mode"`         // "readonly" or "readwrite"; default "readonly"
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid request", http.StatusBadRequest)
@@ -547,8 +549,11 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 	if dur <= 0 {
 		dur = time.Hour
 	}
+	mode := req.Mode
+	if mode != "readwrite" {
+		mode = "readonly"
+	}
 
-	// Look up session ID from active sessions.
 	var sessionID string
 	for _, si := range s.manager.ListSessions() {
 		if si.Name == req.SessionName {
@@ -564,18 +569,20 @@ func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
 		SessionID:   sessionID,
 		ExpiresAt:   time.Now().Add(dur),
 		CreatedAt:   time.Now(),
+		Mode:        mode,
 	}
 
 	s.tokenMu.Lock()
 	s.shareTokens[token] = st
 	s.tokenMu.Unlock()
 
-	slog.Info("share token created", "session", req.SessionName, "token", token[:8]+"...", "expires", st.ExpiresAt.Format(time.RFC3339))
+	slog.Info("share token created", "session", req.SessionName, "mode", mode, "token", token[:8]+"...", "expires", st.ExpiresAt.Format(time.RFC3339))
 
 	writeJSON(w, map[string]string{
 		"token":   token,
 		"url":     fmt.Sprintf("/shared/%s", token),
 		"expires": st.ExpiresAt.Format(time.RFC3339),
+		"mode":    mode,
 	})
 }
 
@@ -604,9 +611,30 @@ func (s *Server) handleSharedSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	remaining := time.Until(st.ExpiresAt).Round(time.Minute)
+	modeLabel := "🔒 Read-only"
+	if st.Mode == "readwrite" {
+		modeLabel = "✏️ Read-write"
+	}
+
+	configJSON, _ := json.Marshal(map[string]string{
+		"token":      token,
+		"session":    st.SessionName,
+		"mode":       st.Mode,
+		"mode_label": modeLabel,
+		"expires":    remaining.String(),
+	})
+
+	tmpl, err := staticFiles.ReadFile("static/shared.html")
+	if err != nil {
+		http.Error(w, "template not found", http.StatusInternalServerError)
+		return
+	}
+
+	html := strings.Replace(string(tmpl), "{{TITLE}}", st.SessionName, 1)
+	html = strings.Replace(html, "{{CONFIG_JSON}}", string(configJSON), 1)
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	fmt.Fprintf(w, sharedSessionHTML, st.SessionName, token, st.SessionName, remaining.String())
+	fmt.Fprint(w, html)
 }
 
 func (s *Server) handleSharedWS(w http.ResponseWriter, r *http.Request) {
@@ -616,7 +644,7 @@ func (s *Server) handleSharedWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Invalid or expired share link", http.StatusForbidden)
 		return
 	}
-	s.bridge.HandleSharedWS(w, r, st.SessionName)
+	s.bridge.HandleSharedWS(w, r, st.SessionName, st.Mode)
 }
 
 func generateToken() string {
@@ -625,111 +653,3 @@ func generateToken() string {
 	return fmt.Sprintf("%x", b)
 }
 
-const sharedSessionHTML = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>%s — Otto Shared Session</title>
-<link rel="stylesheet" href="/style.css">
-<style>
-  body { background: var(--bg-primary); color: var(--text-primary); }
-  #shared-app { display: flex; flex-direction: column; height: 100vh; }
-  #shared-header {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 8px 16px; background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border); flex-shrink: 0;
-  }
-  #shared-header h2 { font-size: 14px; margin: 0; }
-  #shared-header .meta { font-size: 11px; color: var(--text-muted); }
-  #shared-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
-  .read-only-notice {
-    text-align: center; font-size: 12px; color: var(--text-muted);
-    padding: 8px; border-top: 1px solid var(--border); background: var(--bg-secondary);
-  }
-</style>
-</head>
-<body>
-<div id="shared-app">
-  <div id="shared-header">
-    <h2>📡 <span id="session-title"></span></h2>
-    <span class="meta">Read-only · Expires in <span id="expires"></span></span>
-  </div>
-  <div id="shared-messages"></div>
-  <div class="read-only-notice">This is a read-only shared view</div>
-</div>
-<script>
-const TOKEN = '%s';
-const SESSION_NAME = '%s';
-const EXPIRES_IN = '%s';
-document.getElementById('session-title').textContent = SESSION_NAME;
-document.getElementById('expires').textContent = EXPIRES_IN;
-
-const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-const ws = new WebSocket(proto + '//' + location.host + '/ws/shared/' + TOKEN);
-
-ws.onmessage = function(evt) {
-  try {
-    const msg = JSON.parse(evt.data);
-    const container = document.getElementById('shared-messages');
-    switch(msg.type) {
-      case 'session_history':
-        container.innerHTML = '';
-        (msg.payload.messages || []).forEach(function(m) {
-          if (!m.content || !m.content.trim()) return;
-          appendMsg(m.role, m.content);
-        });
-        break;
-      case 'content_delta':
-        if (!document.getElementById('streaming')) {
-          appendMsg('assistant', '', true);
-        }
-        var el = document.getElementById('streaming');
-        if (el) el.innerHTML += esc(msg.payload.content);
-        break;
-      case 'turn_end':
-        var s = document.getElementById('streaming');
-        if (s) s.id = '';
-        // Refetch history for non-streamed responses
-        ws.send(JSON.stringify({type:'get_history',payload:{session_name:SESSION_NAME}}));
-        break;
-      case 'tool_started':
-        var tool = document.createElement('div');
-        tool.className = 'tool-indicator running';
-        tool.id = 'tool-' + msg.payload.call_id;
-        var detail = '';
-        try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.path||a.command||a.pattern||''; } catch(e){}
-        if (detail.length > 50) detail = detail.substring(0,47)+'...';
-        tool.innerHTML = '⏳ <span class="tool-name">' + esc(msg.payload.tool_name) + (detail ? ': '+esc(detail) : '') + '</span>';
-        container.appendChild(tool);
-        container.scrollTop = container.scrollHeight;
-        break;
-      case 'tool_completed':
-        var te = document.getElementById('tool-' + msg.payload.call_id);
-        if (te) { te.className = 'tool-indicator ' + (msg.payload.success?'completed':'failed'); te.innerHTML = (msg.payload.success?'✅':'❌') + ' ' + te.querySelector('.tool-name').outerHTML; }
-        break;
-    }
-    container.scrollTop = container.scrollHeight;
-  } catch(e) {}
-};
-
-function appendMsg(role, content, streaming) {
-  var div = document.createElement('div');
-  div.className = 'message ' + role;
-  if (streaming) div.id = 'streaming';
-  div.innerHTML = renderMd(content);
-  document.getElementById('shared-messages').appendChild(div);
-}
-function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
-function renderMd(t) {
-  if(!t) return '';
-  var h = esc(t);
-  h = h.replace(/` + "```" + `(\\w*)\\n([\\s\\S]*?)` + "```" + `/g, function(_,l,c){return '<pre><code>'+c+'</code></pre>';});
-  h = h.replace(/` + "`" + `([^` + "`" + `]+)` + "`" + `/g, '<code>$1</code>');
-  h = h.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
-  h = h.replace(/\\n/g, '<br>');
-  return h;
-}
-</script>
-</body>
-</html>`

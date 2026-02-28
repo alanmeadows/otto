@@ -1,0 +1,18 @@
+# Copilot Code Review Instructions for Otto
+#
+# These instructions guide GitHub Copilot when automatically reviewing PRs.
+# See: https://docs.github.com/en/copilot/tutorials/optimize-code-reviews
+
+instructions:
+  - "This is a Go project using the GitHub Copilot SDK (github.com/github/copilot-sdk/go) for LLM interactions."
+  - "Be aggressive — flag all real issues. Prefer false positives over missed bugs."
+  - "Check for goroutine leaks, unclosed resources, and missing context cancellation propagation."
+  - "Verify error handling — errors should not be silently ignored unless there is a clear comment explaining why."
+  - "Check for race conditions in concurrent code — the dashboard uses WebSocket broadcasts, shared maps, and mutex patterns."
+  - "Flag any hardcoded secrets, tokens, or credentials."
+  - "Verify that new HTTP handlers have appropriate access control (guardDashboard or share token validation)."
+  - "Check that new WebSocket message types are handled in both the Go bridge and the JavaScript client."
+  - "Ensure embedded static files (internal/dashboard/static/) are referenced correctly."
+  - "PR monitoring code should handle all error paths — stuck PRs, failed pipelines, and network errors."
+  - "The project uses log/slog for structured logging. Flag fmt.Println or log.Printf usage."
+  - "Tests should use github.com/stretchr/testify for assertions."

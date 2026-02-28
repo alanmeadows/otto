@@ -371,17 +371,21 @@ func extractTunnelEmail(r *http.Request) string {
 	if token == "" {
 		return ""
 	}
+	slog.Debug("tunnel auth header present", "length", len(token), "prefix", token[:min(20, len(token))])
 	// Strip "tunnel " prefix if present.
 	token = strings.TrimPrefix(token, "tunnel ")
 	// JWT is three base64url-encoded parts separated by dots.
 	parts := strings.Split(token, ".")
 	if len(parts) < 2 {
+		slog.Debug("tunnel auth: not a JWT", "parts", len(parts))
 		return ""
 	}
 	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
+		slog.Debug("tunnel auth: base64 decode failed", "error", err)
 		return ""
 	}
+	slog.Debug("tunnel JWT payload", "raw", string(payload))
 	var claims struct {
 		Email             string `json:"email"`
 		PreferredUsername string `json:"preferred_username"`
@@ -391,17 +395,17 @@ func extractTunnelEmail(r *http.Request) string {
 	if err := json.Unmarshal(payload, &claims); err != nil {
 		return ""
 	}
-	// Try email fields in priority order.
-	if claims.Email != "" {
-		return strings.ToLower(claims.Email)
+	email := claims.Email
+	if email == "" {
+		email = claims.PreferredUsername
 	}
-	if claims.PreferredUsername != "" {
-		return strings.ToLower(claims.PreferredUsername)
+	if email == "" {
+		email = claims.UPN
 	}
-	if claims.UPN != "" {
-		return strings.ToLower(claims.UPN)
+	if email != "" {
+		slog.Info("tunnel user identified", "email", strings.ToLower(email), "name", claims.Name)
 	}
-	return ""
+	return strings.ToLower(email)
 }
 
 // isDashboardAccessAllowed checks if the request should be allowed to access the dashboard.

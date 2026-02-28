@@ -28,8 +28,9 @@ type Server struct {
 	cfg         *config.Config
 	srv         *http.Server
 	mu          sync.Mutex
-	shareTokens map[string]*ShareToken // token -> share info
-	tokenMu     sync.RWMutex
+	shareTokens   map[string]*ShareToken // token -> share info
+	tokenMu       sync.RWMutex
+	ListPRsFn     func() (any, error) // injected by server package to avoid import cycle
 }
 
 // ShareToken represents a time-limited share link for a single session.
@@ -218,6 +219,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/sessions", s.guardDashboard(s.handleCreateSession))
 	mux.HandleFunc("DELETE /api/sessions/{name}", s.guardDashboard(s.handleDeleteSession))
 	mux.HandleFunc("GET /api/worktrees", s.guardDashboard(s.handleListWorktrees))
+	mux.HandleFunc("GET /api/prs", s.guardDashboard(s.handleListPRs))
+	mux.HandleFunc("GET /api/repos", s.guardDashboard(s.handleListRepos))
 	mux.HandleFunc("GET /api/tunnel/status", s.guardDashboard(s.handleTunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/start", s.guardDashboard(s.handleStartTunnel))
 	mux.HandleFunc("POST /api/tunnel/stop", s.guardDashboard(s.handleStopTunnel))
@@ -281,6 +284,23 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListWorktrees(w http.ResponseWriter, r *http.Request) {
 	worktrees := s.listWorktrees()
 	writeJSON(w, WorktreesListPayload{Worktrees: worktrees})
+}
+
+func (s *Server) handleListPRs(w http.ResponseWriter, r *http.Request) {
+	if s.ListPRsFn == nil {
+		writeJSON(w, []any{})
+		return
+	}
+	prs, err := s.ListPRsFn()
+	if err != nil {
+		writeJSON(w, []any{})
+		return
+	}
+	writeJSON(w, prs)
+}
+
+func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.cfg.Repos)
 }
 
 func (s *Server) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
@@ -495,7 +515,7 @@ func (s *Server) watchPersistedSessions(ctx context.Context) {
 func persistedHash(sessions []copilot.PersistedSession) string {
 	var b strings.Builder
 	for _, s := range sessions {
-		fmt.Fprintf(&b, "%s:%d:%s;", s.SessionID, s.LastModified.Unix(), s.Summary)
+		fmt.Fprintf(&b, "%s:%s:%s;", s.SessionID, s.UpdatedAt, s.Summary)
 	}
 	return b.String()
 }

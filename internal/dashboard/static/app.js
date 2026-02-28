@@ -317,29 +317,21 @@ function resumePersistedSession(sessionId) {
 }
 
 function renderTunnelStatus() {
-    const stateEl = document.getElementById('tunnel-state');
-    const urlDisplay = document.getElementById('tunnel-url-display');
+    const activeEl = document.getElementById('tunnel-active');
+    const inactiveEl = document.getElementById('tunnel-inactive');
     const urlInput = document.getElementById('tunnel-url-input');
-    const startBtn = document.getElementById('start-tunnel-btn');
-    const stopBtn = document.getElementById('stop-tunnel-btn');
     const badge = document.getElementById('tunnel-status');
 
-    if (state.tunnelRunning) {
-        stateEl.textContent = 'Running';
-        stateEl.style.color = 'var(--green)';
-        urlDisplay.classList.remove('hidden');
+    if (state.tunnelRunning && state.tunnelURL) {
+        activeEl.classList.remove('hidden');
+        inactiveEl.classList.add('hidden');
         urlInput.value = state.tunnelURL;
-        startBtn.classList.add('hidden');
-        stopBtn.classList.remove('hidden');
         badge.classList.remove('hidden');
         badge.textContent = '🔗 Tunnel';
         badge.title = state.tunnelURL;
     } else {
-        stateEl.textContent = state.tunnelURL || 'Not running';
-        stateEl.style.color = state.tunnelURL ? 'var(--red)' : 'var(--text-muted)';
-        urlDisplay.classList.add('hidden');
-        startBtn.classList.remove('hidden');
-        stopBtn.classList.add('hidden');
+        activeEl.classList.add('hidden');
+        inactiveEl.classList.remove('hidden');
         badge.classList.add('hidden');
     }
 }
@@ -560,12 +552,6 @@ function sendMessage() {
     document.getElementById('send-btn').disabled = true;
 }
 
-function updateTunnelAccessFields() {
-    const mode = document.getElementById('tunnel-access-mode').value;
-    const orgGroup = document.getElementById('tunnel-org-group');
-    orgGroup.classList.toggle('hidden', mode !== '');
-}
-
 function handleAllowedUsersList(payload) {
     const container = document.getElementById('allowed-users-list');
     container.innerHTML = '';
@@ -652,26 +638,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // Share button
     document.getElementById('share-btn').addEventListener('click', shareSession);
 
-    // Tunnel controls
-    document.getElementById('start-tunnel-btn').addEventListener('click', () => {
-        send('start_tunnel', {});
-    });
-    document.getElementById('stop-tunnel-btn').addEventListener('click', () => {
-        send('stop_tunnel', {});
-    });
+    // Tunnel URL copy
     document.getElementById('copy-tunnel-url').addEventListener('click', () => {
         const url = document.getElementById('tunnel-url-input').value;
         navigator.clipboard.writeText(url).catch(() => {});
-    });
-
-    // Tunnel settings
-    document.getElementById('save-tunnel-settings').addEventListener('click', () => {
-        send('set_tunnel_config', {
-            tunnel_id: document.getElementById('tunnel-id').value.trim(),
-            access: document.getElementById('tunnel-access-mode').value,
-            allow_org: document.getElementById('tunnel-allow-org').value.trim(),
-        });
-        alert('Tunnel settings saved. Restart tunnel to apply.');
     });
 
     // Allowed users

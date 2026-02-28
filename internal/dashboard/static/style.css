@@ -440,7 +440,9 @@ body {
 /* Tunnel */
 .tunnel-info { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .tunnel-label { color: var(--text-muted); }
-.tunnel-actions { display: flex; gap: 8px; }
+.tunnel-hint { font-size: 11px; color: var(--text-muted); line-height: 1.6; }
+.tunnel-hint code { font-size: 10px; }
+.tunnel-hint a { color: var(--accent); }
 .tunnel-settings {
     margin: 8px 0;
     font-size: 12px;

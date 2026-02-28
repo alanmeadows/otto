@@ -23,6 +23,7 @@ type PersistedSession struct {
 	Summary      string    `json:"summary,omitempty"`
 	CreatedAt    string    `json:"created_at,omitempty"`
 	UpdatedAt    string    `json:"updated_at,omitempty"`
+	updatedTime  time.Time // parsed UpdatedAt for sorting
 }
 
 // Manager manages multiple copilot sessions and broadcasts their events.
@@ -322,12 +323,16 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 			ps.Summary = meta.summary
 			ps.CreatedAt = meta.createdAt
 			ps.UpdatedAt = meta.updatedAt
+			if t, err := time.Parse(time.RFC3339Nano, meta.updatedAt); err == nil {
+				ps.updatedTime = t
+				ps.LastModified = t
+			}
 		}
 		result = append(result, ps)
 	}
 
 	sort.Slice(result, func(i, j int) bool {
-		return result[i].LastModified.After(result[j].LastModified)
+		return result[i].updatedTime.After(result[j].updatedTime)
 	})
 	return result
 }

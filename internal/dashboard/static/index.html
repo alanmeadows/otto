@@ -41,46 +41,32 @@
                         <h2>Tunnel</h2>
                     </div>
                     <div id="tunnel-controls">
-                        <div id="tunnel-info" class="tunnel-info">
-                            <span class="tunnel-label">Status:</span>
-                            <span id="tunnel-state">Not running</span>
+                        <div id="tunnel-active" class="hidden">
+                            <div class="tunnel-info">
+                                <span class="tunnel-label">Status:</span>
+                                <span style="color:var(--green)">Active</span>
+                            </div>
+                            <div id="tunnel-url-display">
+                                <input id="tunnel-url-input" type="text" readonly>
+                                <button id="copy-tunnel-url" class="small-btn">Copy</button>
+                            </div>
+                            <details class="tunnel-settings">
+                                <summary>Allowed Users</summary>
+                                <div class="allowed-users-hint">Only these users can access the full dashboard. Share links bypass this.</div>
+                                <div id="allowed-users-list"></div>
+                                <div class="allowed-users-add">
+                                    <input id="add-user-email" type="email" placeholder="user@microsoft.com">
+                                    <button id="add-user-btn" class="small-btn">Add</button>
+                                </div>
+                            </details>
                         </div>
-                        <div id="tunnel-url-display" class="hidden">
-                            <input id="tunnel-url-input" type="text" readonly>
-                            <button id="copy-tunnel-url" class="small-btn">Copy</button>
-                        </div>
-                        <details class="tunnel-settings">
-                            <summary>Access Settings</summary>
-                            <div class="form-group">
-                                <label for="tunnel-access-mode">Tunnel Auth</label>
-                                <select id="tunnel-access-mode" onchange="updateTunnelAccessFields()">
-                                    <option value="tenant">Entra ID (recommended)</option>
-                                    <option value="">Owner only</option>
-                                    <option value="anonymous">Anonymous (public)</option>
-                                </select>
+                        <div id="tunnel-inactive">
+                            <div class="tunnel-info">
+                                <span class="tunnel-label">Status:</span>
+                                <span style="color:var(--text-muted)">Not active</span>
                             </div>
-                            <div class="form-group" id="tunnel-org-group">
-                                <label for="tunnel-allow-org">GitHub Org</label>
-                                <input id="tunnel-allow-org" type="text" placeholder="e.g. microsoft">
-                            </div>
-                            <div class="form-group">
-                                <label for="tunnel-id">Tunnel ID</label>
-                                <input id="tunnel-id" type="text" placeholder="e.g. my-otto">
-                            </div>
-                            <button id="save-tunnel-settings" class="btn btn-sm" style="margin-top:4px">Save & Apply</button>
-                        </details>
-                        <details class="tunnel-settings">
-                            <summary>Allowed Users</summary>
-                            <div class="allowed-users-hint">Only these users can access the full dashboard. Share links bypass this.</div>
-                            <div id="allowed-users-list"></div>
-                            <div class="allowed-users-add">
-                                <input id="add-user-email" type="email" placeholder="user@microsoft.com">
-                                <button id="add-user-btn" class="small-btn">Add</button>
-                            </div>
-                        </details>
-                        <div class="tunnel-actions">
-                            <button id="start-tunnel-btn" class="btn btn-sm">Start Tunnel</button>
-                            <button id="stop-tunnel-btn" class="btn btn-sm btn-danger hidden">Stop Tunnel</button>
+                            <div class="tunnel-hint">Enable via CLI: <code>otto server start --dashboard --tunnel</code><br>
+                            <a href="https://github.com/alanmeadows/otto/blob/main/docs/tunnel.md" target="_blank" rel="noopener">Setup guide →</a></div>
                         </div>
                     </div>
                 </div>

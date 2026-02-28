@@ -1,4 +1,4 @@
-You are generating a pull request description for an Azure DevOps PR.
+You are generating a pull request description.
 
 ## Branch
 
@@ -7,18 +7,6 @@ You are generating a pull request description for an Azure DevOps PR.
 ## Commit Log
 
 {{.CommitLog}}
-
-{{if .SpecRequirements}}
-## Specification Requirements
-
-{{.SpecRequirements}}
-{{end}}
-
-{{if .SpecDesign}}
-## Specification Design
-
-{{.SpecDesign}}
-{{end}}
 
 ## Instructions
 
@@ -33,7 +21,7 @@ The description body should:
 1. Summarize what changes were made and why
 2. Highlight key implementation decisions
 3. Note any risks or areas requiring careful review
-4. Use markdown formatting appropriate for ADO
+4. Use markdown formatting
 
 Keep the description focused and professional. Do not include disclaimers about being an AI.
 Output ONLY the title and description — no wrapping, no code fences, no preamble.

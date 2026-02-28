@@ -570,16 +570,10 @@ func generatePRDescription(ctx context.Context, w io.Writer, workDir, branchName
 		commitLog = "(no commits)"
 	}
 
-	// Try to read spec artifacts.
-	specRequirements := readSpecArtifact(workDir, "requirements.md")
-	specDesign := readSpecArtifact(workDir, "design.md")
-
 	// Build prompt.
 	templateData := map[string]string{
-		"BranchName":       branchName,
-		"CommitLog":        commitLog,
-		"SpecRequirements": specRequirements,
-		"SpecDesign":       specDesign,
+		"BranchName": branchName,
+		"CommitLog":  commitLog,
 	}
 
 	prompt, err := prompts.Execute("pr-description.md", templateData)
@@ -708,23 +702,6 @@ func notifyDaemon(w io.Writer) {
 	if resp.StatusCode == http.StatusOK {
 		fmt.Fprintf(w, "  ✓ Daemon notified — immediate poll triggered\n")
 	}
-}
-
-// readSpecArtifact attempts to read a spec artifact file from the .otto directory.
-func readSpecArtifact(workDir, name string) string {
-	paths := []string{
-		workDir + "/.otto/" + name,
-		workDir + "/.otto/specs/" + name,
-	}
-	for _, p := range paths {
-		if data, err := exec.Command("cat", p).Output(); err == nil {
-			content := strings.TrimSpace(string(data))
-			if content != "" {
-				return content
-			}
-		}
-	}
-	return ""
 }
 
 // repoNameFromRemote extracts the repository name from the git remote URL.

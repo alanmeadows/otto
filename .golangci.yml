@@ -9,15 +9,13 @@ linters:
   disable:
     - errcheck
 
-linters-settings:
-  staticcheck:
-    checks:
-      - all
-      - -QF1012  # WriteString(fmt.Sprintf) style — not worth fixing now
-      - -ST1005  # capitalized error strings — existing code uses them
+  settings:
+    staticcheck:
+      checks:
+        - all
+        - -QF1012
+        - -ST1005
 
 issues:
-  exclude-dirs:
-    - vendor
   max-issues-per-linter: 0
   max-same-issues: 0

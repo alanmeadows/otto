@@ -1,180 +1,254 @@
 package tunnel
 
 import (
-	"bufio"
-	"context"
-	"fmt"
-	"log/slog"
-	"os/exec"
-	"regexp"
-	"strings"
-	"sync"
+"bufio"
+"context"
+"fmt"
+"log/slog"
+"os/exec"
+"regexp"
+"strings"
+"sync"
 )
 
 var tunnelURLPattern = regexp.MustCompile(`https://[^\s]*\.devtunnels\.ms[^\s]*`)
 
-// Manager wraps the Azure DevTunnel CLI for hosting and managing tunnels.
-type Manager struct {
-	cmd            *exec.Cmd
-	mu             sync.Mutex
-	url            string
-	running        bool
-	port           int
-	cancel         context.CancelFunc
-	onStatusChange func(running bool, url string)
+// Config controls tunnel creation and access.
+type Config struct {
+TunnelID    string   // persistent tunnel name; empty = ephemeral
+Access      string   // "anonymous", "tenant", or "" (authenticated, the default)
+AllowOrg    string   // GitHub org to allow
+AllowEmails []string // specific emails to allow
 }
 
-// NewManager returns a new tunnel Manager.
+// Manager wraps the Azure DevTunnel CLI for hosting and managing tunnels.
+type Manager struct {
+cmd            *exec.Cmd
+mu             sync.Mutex
+url            string
+running        bool
+port           int
+cancel         context.CancelFunc
+onStatusChange func(running bool, url string)
+config         Config
+}
+
+// NewManager returns a new tunnel Manager with default (authenticated) config.
 func NewManager() *Manager {
-	return &Manager{}
+return &Manager{}
+}
+
+// NewManagerWithConfig returns a tunnel Manager with the given config.
+func NewManagerWithConfig(cfg Config) *Manager {
+return &Manager{config: cfg}
 }
 
 // SetStatusHandler registers a callback invoked whenever the tunnel status changes.
 func (m *Manager) SetStatusHandler(fn func(running bool, url string)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.onStatusChange = fn
+m.mu.Lock()
+defer m.mu.Unlock()
+m.onStatusChange = fn
 }
 
 // IsInstalled reports whether the devtunnel binary is available in PATH.
 func (m *Manager) IsInstalled() bool {
-	_, err := exec.LookPath("devtunnel")
-	return err == nil
+_, err := exec.LookPath("devtunnel")
+return err == nil
 }
 
 // IsLoggedIn checks whether the current user is logged in to devtunnel.
 func (m *Manager) IsLoggedIn() (bool, error) {
-	cmd := exec.Command("devtunnel", "user", "show")
-	if err := cmd.Run(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			return false, fmt.Errorf("devtunnel user show exited with code %d", exitErr.ExitCode())
-		}
-		return false, err
-	}
-	return true, nil
+cmd := exec.Command("devtunnel", "user", "show")
+if err := cmd.Run(); err != nil {
+if exitErr, ok := err.(*exec.ExitError); ok {
+return false, fmt.Errorf("devtunnel user show exited with code %d", exitErr.ExitCode())
+}
+return false, err
+}
+return true, nil
 }
 
-// Start hosts a devtunnel on the given port. It returns immediately after
-// launching the background process; the tunnel URL becomes available
-// asynchronously once devtunnel prints it to stdout.
+// ensurePersistentTunnel creates the tunnel and port if needed,
+// and configures access control entries.
+func (m *Manager) ensurePersistentTunnel(port int) error {
+tid := m.config.TunnelID
+if tid == "" {
+return nil
+}
+
+// Create tunnel (idempotent — fails silently if exists).
+runCmd("devtunnel", "create", tid)
+
+// Create port (idempotent).
+runCmd("devtunnel", "port", "create", tid, "-p", fmt.Sprintf("%d", port))
+
+// Reset access control to start fresh.
+runCmd("devtunnel", "access", "reset", tid)
+
+// Apply access rules.
+switch m.config.Access {
+case "anonymous":
+runCmd("devtunnel", "access", "create", tid, "--anonymous")
+slog.Info("tunnel access: anonymous")
+case "tenant":
+runCmd("devtunnel", "access", "create", tid, "--tenant")
+slog.Info("tunnel access: Entra tenant")
+default:
+slog.Info("tunnel access: authenticated (owner only unless org specified)")
+}
+
+if m.config.AllowOrg != "" {
+runCmd("devtunnel", "access", "create", tid, "--org", m.config.AllowOrg)
+slog.Info("tunnel access: granted to GitHub org", "org", m.config.AllowOrg)
+}
+
+if len(m.config.AllowEmails) > 0 {
+slog.Info("tunnel access: individual emails require org/tenant membership for DevTunnel auth",
+"emails", m.config.AllowEmails)
+}
+
+return nil
+}
+
+// Start hosts a devtunnel on the given port.
 func (m *Manager) Start(ctx context.Context, port int) error {
-	m.mu.Lock()
-	if m.running {
-		m.mu.Unlock()
-		return nil
-	}
+m.mu.Lock()
+if m.running {
+m.mu.Unlock()
+return nil
+}
 
-	ctx, cancel := context.WithCancel(ctx)
-	m.cancel = cancel
-	m.port = port
+ctx, cancel := context.WithCancel(ctx)
+m.cancel = cancel
+m.port = port
 
-	cmd := exec.CommandContext(ctx, "devtunnel", "host", "-p", fmt.Sprintf("%d", port), "--allow-anonymous")
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		m.mu.Unlock()
-		return fmt.Errorf("creating stdout pipe: %w", err)
-	}
+if m.config.TunnelID != "" {
+if err := m.ensurePersistentTunnel(port); err != nil {
+cancel()
+m.mu.Unlock()
+return fmt.Errorf("setting up persistent tunnel: %w", err)
+}
+}
 
-	if err := cmd.Start(); err != nil {
-		cancel()
-		m.mu.Unlock()
-		return fmt.Errorf("starting devtunnel: %w", err)
-	}
+args := []string{"host"}
+if m.config.TunnelID != "" {
+args = append(args, m.config.TunnelID)
+} else {
+args = append(args, "-p", fmt.Sprintf("%d", port))
+if m.config.Access == "anonymous" {
+args = append(args, "--allow-anonymous")
+}
+}
 
-	m.cmd = cmd
-	m.running = true
-	m.url = ""
-	callback := m.onStatusChange
-	m.mu.Unlock()
+cmd := exec.CommandContext(ctx, "devtunnel", args...)
+stdout, err := cmd.StdoutPipe()
+if err != nil {
+cancel()
+m.mu.Unlock()
+return fmt.Errorf("creating stdout pipe: %w", err)
+}
 
-	slog.Info("devtunnel process started", "port", port, "pid", cmd.Process.Pid)
+if err := cmd.Start(); err != nil {
+cancel()
+m.mu.Unlock()
+return fmt.Errorf("starting devtunnel: %w", err)
+}
 
-	// Read stdout in the background looking for the tunnel URL.
-	go func() {
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			line := scanner.Text()
-			slog.Debug("devtunnel output", "line", line)
+m.cmd = cmd
+m.running = true
+m.url = ""
+callback := m.onStatusChange
+m.mu.Unlock()
 
-			if strings.Contains(line, ".devtunnels.ms") {
-				if match := tunnelURLPattern.FindString(line); match != "" {
-					// Skip the inspect/debug URL — we want the actual app URL.
-					if strings.Contains(match, "-inspect") {
-						continue
-					}
-					m.mu.Lock()
-					m.url = match
-					cb := m.onStatusChange
-					m.mu.Unlock()
+slog.Info("devtunnel process started", "port", port, "tunnel_id", m.config.TunnelID, "access", m.config.Access, "pid", cmd.Process.Pid)
 
-					slog.Info("devtunnel URL discovered", "url", match)
-					if cb != nil {
-						cb(true, match)
-					}
-				}
-			}
-		}
+go func() {
+scanner := bufio.NewScanner(stdout)
+for scanner.Scan() {
+line := scanner.Text()
+slog.Debug("devtunnel output", "line", line)
 
-		// Process has exited or stdout was closed.
-		_ = cmd.Wait()
+if strings.Contains(line, ".devtunnels.ms") {
+if match := tunnelURLPattern.FindString(line); match != "" {
+if strings.Contains(match, "-inspect") {
+continue
+}
+m.mu.Lock()
+m.url = match
+cb := m.onStatusChange
+m.mu.Unlock()
 
-		m.mu.Lock()
-		m.running = false
-		m.url = ""
-		m.cmd = nil
-		cb := m.onStatusChange
-		m.mu.Unlock()
+slog.Info("devtunnel URL discovered", "url", match)
+if cb != nil {
+cb(true, match)
+}
+}
+}
+}
 
-		slog.Info("devtunnel process exited", "port", port)
-		if cb != nil {
-			cb(false, "")
-		}
-	}()
+_ = cmd.Wait()
 
-	// Notify that the tunnel is starting (URL not yet available).
-	if callback != nil {
-		callback(true, "")
-	}
+m.mu.Lock()
+m.running = false
+m.url = ""
+m.cmd = nil
+cb := m.onStatusChange
+m.mu.Unlock()
 
-	return nil
+slog.Info("devtunnel process exited", "port", port)
+if cb != nil {
+cb(false, "")
+}
+}()
+
+if callback != nil {
+callback(true, "")
+}
+
+return nil
 }
 
 // Stop terminates the running devtunnel process and resets state.
 func (m *Manager) Stop() error {
-	m.mu.Lock()
-	if !m.running {
-		m.mu.Unlock()
-		return nil
-	}
+m.mu.Lock()
+if !m.running {
+m.mu.Unlock()
+return nil
+}
 
-	cancel := m.cancel
-	cmd := m.cmd
-	m.mu.Unlock()
+cancel := m.cancel
+cmd := m.cmd
+m.mu.Unlock()
 
-	if cancel != nil {
-		cancel()
-	}
+if cancel != nil {
+cancel()
+}
 
-	if cmd != nil {
-		// Wait for the process to finish; the goroutine from Start will
-		// handle resetting state and firing the callback.
-		_ = cmd.Wait()
-	}
+if cmd != nil {
+_ = cmd.Wait()
+}
 
-	return nil
+return nil
 }
 
 // Status returns whether the tunnel is running and its public URL.
 func (m *Manager) Status() (bool, string) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.running, m.url
+m.mu.Lock()
+defer m.mu.Unlock()
+return m.running, m.url
 }
 
 // URL returns the current tunnel URL, or empty string if not running.
 func (m *Manager) URL() string {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.url
+m.mu.Lock()
+defer m.mu.Unlock()
+return m.url
+}
+
+func runCmd(name string, args ...string) {
+cmd := exec.Command(name, args...)
+out, err := cmd.CombinedOutput()
+if err != nil {
+slog.Debug("tunnel setup command", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
+}
 }

@@ -39,7 +39,12 @@ func NewServer(cfg *config.Config) *Server {
 		mgr = copilot.NewManager()
 	}
 	bridge := NewBridge(mgr)
-	tmgr := tunnel.NewManager()
+	tmgr := tunnel.NewManagerWithConfig(tunnel.Config{
+		TunnelID:    cfg.Dashboard.TunnelID,
+		Access:      cfg.Dashboard.TunnelAccess,
+		AllowOrg:    cfg.Dashboard.TunnelAllowOrg,
+		AllowEmails: cfg.Dashboard.TunnelAllowEmails,
+	})
 
 	s := &Server{
 		manager:   mgr,

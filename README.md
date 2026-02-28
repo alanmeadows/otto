@@ -1,5 +1,10 @@
 # Otto
 
+[![CI](https://github.com/alanmeadows/otto/actions/workflows/ci.yml/badge.svg)](https://github.com/alanmeadows/otto/actions/workflows/ci.yml)
+[![Go Report Card](https://goreportcard.com/badge/github.com/alanmeadows/otto)](https://goreportcard.com/report/github.com/alanmeadows/otto)
+[![Go Reference](https://pkg.go.dev/badge/github.com/alanmeadows/otto.svg)](https://pkg.go.dev/github.com/alanmeadows/otto)
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 AI-powered PR lifecycle manager with a Copilot session dashboard.
 
 ## Overview

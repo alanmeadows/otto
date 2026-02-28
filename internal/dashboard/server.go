@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -21,11 +22,22 @@ import (
 // REST API, and WebSocket bridge.
 type Server struct {
 	manager   *copilot.Manager
-	bridge    *Bridge
-	tunnelMgr *tunnel.Manager
-	cfg       *config.Config
-	srv       *http.Server
-	mu        sync.Mutex
+	bridge      *Bridge
+	tunnelMgr   *tunnel.Manager
+	cfg         *config.Config
+	srv         *http.Server
+	mu          sync.Mutex
+	shareTokens map[string]*ShareToken // token -> share info
+	tokenMu     sync.RWMutex
+}
+
+// ShareToken represents a time-limited share link for a single session.
+type ShareToken struct {
+	Token       string    `json:"token"`
+	SessionName string    `json:"session_name"`
+	SessionID   string    `json:"session_id"`
+	ExpiresAt   time.Time `json:"expires_at"`
+	CreatedAt   time.Time `json:"created_at"`
 }
 
 // NewServer creates a dashboard server with all subsystems.
@@ -47,10 +59,11 @@ func NewServer(cfg *config.Config) *Server {
 	})
 
 	s := &Server{
-		manager:   mgr,
-		bridge:    bridge,
-		tunnelMgr: tmgr,
-		cfg:       cfg,
+		manager:     mgr,
+		bridge:      bridge,
+		tunnelMgr:   tmgr,
+		cfg:         cfg,
+		shareTokens: make(map[string]*ShareToken),
 	}
 
 	// Wire tunnel status changes into the bridge.
@@ -153,9 +166,14 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tunnel/status", s.handleTunnelStatus)
 	mux.HandleFunc("POST /api/tunnel/start", s.handleStartTunnel)
 	mux.HandleFunc("POST /api/tunnel/stop", s.handleStopTunnel)
+	mux.HandleFunc("POST /api/share", s.handleCreateShare)
 
 	// WebSocket.
 	mux.HandleFunc("GET /ws", s.handleWS)
+
+	// Shared session view (read-only, token-gated).
+	mux.HandleFunc("GET /shared/{token}", s.handleSharedSession)
+	mux.HandleFunc("GET /ws/shared/{token}", s.handleSharedWS)
 }
 
 // --- WebSocket ---
@@ -321,3 +339,209 @@ func persistedHash(sessions []copilot.PersistedSession) string {
 	}
 	return b.String()
 }
+
+// --- Shared session support ---
+
+func (s *Server) handleCreateShare(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		SessionName string `json:"session_name"`
+		DurationMin int    `json:"duration_min"` // 0 = default 60 minutes
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	if req.SessionName == "" {
+		http.Error(w, "session_name required", http.StatusBadRequest)
+		return
+	}
+	dur := time.Duration(req.DurationMin) * time.Minute
+	if dur <= 0 {
+		dur = time.Hour
+	}
+
+	// Look up session ID from active sessions.
+	var sessionID string
+	for _, si := range s.manager.ListSessions() {
+		if si.Name == req.SessionName {
+			sessionID = si.SessionID
+			break
+		}
+	}
+
+	token := generateToken()
+	st := &ShareToken{
+		Token:       token,
+		SessionName: req.SessionName,
+		SessionID:   sessionID,
+		ExpiresAt:   time.Now().Add(dur),
+		CreatedAt:   time.Now(),
+	}
+
+	s.tokenMu.Lock()
+	s.shareTokens[token] = st
+	s.tokenMu.Unlock()
+
+	slog.Info("share token created", "session", req.SessionName, "token", token[:8]+"...", "expires", st.ExpiresAt.Format(time.RFC3339))
+
+	writeJSON(w, map[string]string{
+		"token":   token,
+		"url":     fmt.Sprintf("/shared/%s", token),
+		"expires": st.ExpiresAt.Format(time.RFC3339),
+	})
+}
+
+func (s *Server) validateShareToken(token string) *ShareToken {
+	s.tokenMu.RLock()
+	st, ok := s.shareTokens[token]
+	s.tokenMu.RUnlock()
+	if !ok || time.Now().After(st.ExpiresAt) {
+		if ok {
+			// Expired — clean up.
+			s.tokenMu.Lock()
+			delete(s.shareTokens, token)
+			s.tokenMu.Unlock()
+		}
+		return nil
+	}
+	return st
+}
+
+func (s *Server) handleSharedSession(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	st := s.validateShareToken(token)
+	if st == nil {
+		http.Error(w, "Invalid or expired share link", http.StatusForbidden)
+		return
+	}
+
+	remaining := time.Until(st.ExpiresAt).Round(time.Minute)
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	fmt.Fprintf(w, sharedSessionHTML, st.SessionName, token, st.SessionName, remaining.String())
+}
+
+func (s *Server) handleSharedWS(w http.ResponseWriter, r *http.Request) {
+	token := r.PathValue("token")
+	st := s.validateShareToken(token)
+	if st == nil {
+		http.Error(w, "Invalid or expired share link", http.StatusForbidden)
+		return
+	}
+	s.bridge.HandleSharedWS(w, r, st.SessionName)
+}
+
+func generateToken() string {
+	b := make([]byte, 24)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x", b)
+}
+
+const sharedSessionHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>%s — Otto Shared Session</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  body { background: var(--bg-primary); color: var(--text-primary); }
+  #shared-app { display: flex; flex-direction: column; height: 100vh; }
+  #shared-header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 16px; background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  #shared-header h2 { font-size: 14px; margin: 0; }
+  #shared-header .meta { font-size: 11px; color: var(--text-muted); }
+  #shared-messages { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .read-only-notice {
+    text-align: center; font-size: 12px; color: var(--text-muted);
+    padding: 8px; border-top: 1px solid var(--border); background: var(--bg-secondary);
+  }
+</style>
+</head>
+<body>
+<div id="shared-app">
+  <div id="shared-header">
+    <h2>📡 <span id="session-title"></span></h2>
+    <span class="meta">Read-only · Expires in <span id="expires"></span></span>
+  </div>
+  <div id="shared-messages"></div>
+  <div class="read-only-notice">This is a read-only shared view</div>
+</div>
+<script>
+const TOKEN = '%s';
+const SESSION_NAME = '%s';
+const EXPIRES_IN = '%s';
+document.getElementById('session-title').textContent = SESSION_NAME;
+document.getElementById('expires').textContent = EXPIRES_IN;
+
+const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+const ws = new WebSocket(proto + '//' + location.host + '/ws/shared/' + TOKEN);
+
+ws.onmessage = function(evt) {
+  try {
+    const msg = JSON.parse(evt.data);
+    const container = document.getElementById('shared-messages');
+    switch(msg.type) {
+      case 'session_history':
+        container.innerHTML = '';
+        (msg.payload.messages || []).forEach(function(m) {
+          if (!m.content || !m.content.trim()) return;
+          appendMsg(m.role, m.content);
+        });
+        break;
+      case 'content_delta':
+        if (!document.getElementById('streaming')) {
+          appendMsg('assistant', '', true);
+        }
+        var el = document.getElementById('streaming');
+        if (el) el.innerHTML += esc(msg.payload.content);
+        break;
+      case 'turn_end':
+        var s = document.getElementById('streaming');
+        if (s) s.id = '';
+        // Refetch history for non-streamed responses
+        ws.send(JSON.stringify({type:'get_history',payload:{session_name:SESSION_NAME}}));
+        break;
+      case 'tool_started':
+        var tool = document.createElement('div');
+        tool.className = 'tool-indicator running';
+        tool.id = 'tool-' + msg.payload.call_id;
+        var detail = '';
+        try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.path||a.command||a.pattern||''; } catch(e){}
+        if (detail.length > 50) detail = detail.substring(0,47)+'...';
+        tool.innerHTML = '⏳ <span class="tool-name">' + esc(msg.payload.tool_name) + (detail ? ': '+esc(detail) : '') + '</span>';
+        container.appendChild(tool);
+        container.scrollTop = container.scrollHeight;
+        break;
+      case 'tool_completed':
+        var te = document.getElementById('tool-' + msg.payload.call_id);
+        if (te) { te.className = 'tool-indicator ' + (msg.payload.success?'completed':'failed'); te.innerHTML = (msg.payload.success?'✅':'❌') + ' ' + te.querySelector('.tool-name').outerHTML; }
+        break;
+    }
+    container.scrollTop = container.scrollHeight;
+  } catch(e) {}
+};
+
+function appendMsg(role, content, streaming) {
+  var div = document.createElement('div');
+  div.className = 'message ' + role;
+  if (streaming) div.id = 'streaming';
+  div.innerHTML = renderMd(content);
+  document.getElementById('shared-messages').appendChild(div);
+}
+function esc(s) { var d=document.createElement('div'); d.textContent=s; return d.innerHTML; }
+function renderMd(t) {
+  if(!t) return '';
+  var h = esc(t);
+  h = h.replace(/` + "```" + `(\\w*)\\n([\\s\\S]*?)` + "```" + `/g, function(_,l,c){return '<pre><code>'+c+'</code></pre>';});
+  h = h.replace(/` + "`" + `([^` + "`" + `]+)` + "`" + `/g, '<code>$1</code>');
+  h = h.replace(/\\*\\*([^*]+)\\*\\*/g, '<strong>$1</strong>');
+  h = h.replace(/\\n/g, '<br>');
+  return h;
+}
+</script>
+</body>
+</html>`

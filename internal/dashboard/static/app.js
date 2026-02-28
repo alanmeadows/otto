@@ -553,6 +553,25 @@ function sendMessage() {
     document.getElementById('send-btn').disabled = true;
 }
 
+function shareSession() {
+    if (!state.activeSession) return;
+    fetch('/api/share', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_name: state.activeSession, duration_min: 60 })
+    })
+    .then(r => r.json())
+    .then(data => {
+        const fullUrl = location.origin + data.url;
+        navigator.clipboard.writeText(fullUrl).then(() => {
+            alert('Share link copied to clipboard!\n\nExpires: ' + new Date(data.expires).toLocaleTimeString() + '\n\n' + fullUrl);
+        }).catch(() => {
+            prompt('Share link (expires in 1 hour):', fullUrl);
+        });
+    })
+    .catch(err => alert('Failed to create share link: ' + err));
+}
+
 // --- Event Listeners ---
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -588,6 +607,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // New session button
     document.getElementById('new-session-btn').addEventListener('click', showNewSessionDialog);
+
+    // Share button
+    document.getElementById('share-btn').addEventListener('click', shareSession);
 
     // Tunnel controls
     document.getElementById('start-tunnel-btn').addEventListener('click', () => {

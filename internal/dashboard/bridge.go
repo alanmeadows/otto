@@ -24,9 +24,10 @@ type Bridge struct {
 }
 
 type wsClient struct {
-	conn *websocket.Conn
-	ctx  context.Context
-	mu   sync.Mutex // serializes writes
+	conn          *websocket.Conn
+	ctx           context.Context
+	mu            sync.Mutex // serializes writes
+	sessionFilter string     // if set, only receive events for this session (shared view)
 }
 
 // NewBridge creates a Bridge wired to the given copilot Manager.
@@ -65,6 +66,46 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	b.sendPersistedSessions(client)
 
 	// Read loop — handle client commands.
+	b.readLoop(ctx, id, client)
+}
+
+// HandleSharedWS is the HTTP handler for /ws/shared/{token} — read-only, single session.
+func (b *Bridge) HandleSharedWS(w http.ResponseWriter, r *http.Request, sessionName string) {
+	c, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		InsecureSkipVerify: true,
+	})
+	if err != nil {
+		slog.Warn("shared websocket accept failed", "error", err)
+		return
+	}
+
+	ctx := r.Context()
+	b.mu.Lock()
+	b.nextID++
+	id := fmt.Sprintf("shared-%d", b.nextID)
+	client := &wsClient{conn: c, ctx: ctx, sessionFilter: sessionName}
+	b.clients[id] = client
+	b.mu.Unlock()
+
+	slog.Info("shared websocket client connected", "id", id, "session", sessionName, "remote", r.RemoteAddr)
+
+	// Send the session history immediately.
+	history, err := b.manager.GetHistory(sessionName)
+	if err == nil {
+		msgs := make([]MessageSummary, 0, len(history))
+		for _, m := range history {
+			if m.Content == "" {
+				continue
+			}
+			msgs = append(msgs, MessageSummary{Role: m.Role, Content: m.Content, Timestamp: m.Timestamp})
+		}
+		b.sendTo(client, MsgSessionHistory, SessionHistoryPayload{
+			SessionName: sessionName,
+			Messages:    msgs,
+		})
+	}
+
+	// Read loop — only accept get_history, ignore everything else (read-only).
 	b.readLoop(ctx, id, client)
 }
 
@@ -192,49 +233,50 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 // --- Event handler ---
 
 func (b *Bridge) onSessionEvent(evt copilot.SessionEvent) {
+	sn := evt.SessionName
 	switch evt.Type {
 	case copilot.EventContentDelta:
-		b.broadcast(MsgContentDelta, ContentDeltaPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgContentDelta, ContentDeltaPayload{
+			SessionName: sn,
 			Content:     deref(evt.Data.Content),
-		})
+		}, sn)
 	case copilot.EventToolStart:
-		b.broadcast(MsgToolStarted, ToolStartedPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgToolStarted, ToolStartedPayload{
+			SessionName: sn,
 			ToolName:    deref(evt.Data.ToolName),
 			CallID:      deref(evt.Data.ToolCallID),
 			ToolInput:   deref(evt.Data.ToolInput),
-		})
+		}, sn)
 	case copilot.EventToolComplete:
-		b.broadcast(MsgToolCompleted, ToolCompletedPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgToolCompleted, ToolCompletedPayload{
+			SessionName: sn,
 			CallID:      deref(evt.Data.ToolCallID),
 			Result:      deref(evt.Data.ToolResult),
 			Success:     derefBool(evt.Data.ToolSuccess),
-		})
+		}, sn)
 	case copilot.EventIntentChanged:
-		b.broadcast(MsgIntentChanged, IntentChangedPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgIntentChanged, IntentChangedPayload{
+			SessionName: sn,
 			Intent:      deref(evt.Data.Intent),
-		})
+		}, sn)
 	case copilot.EventTurnStart:
-		b.broadcast(MsgTurnStart, TurnPayload{SessionName: evt.SessionName})
+		b.broadcastFiltered(MsgTurnStart, TurnPayload{SessionName: sn}, sn)
 		b.broadcastSessionsList()
 	case copilot.EventTurnEnd:
-		b.broadcast(MsgTurnEnd, TurnPayload{SessionName: evt.SessionName})
+		b.broadcastFiltered(MsgTurnEnd, TurnPayload{SessionName: sn}, sn)
 		b.broadcastSessionsList()
 	case copilot.EventSessionError:
-		b.broadcast(MsgSessionError, ErrorPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgSessionError, ErrorPayload{
+			SessionName: sn,
 			Message:     deref(evt.Data.ErrorMessage),
-		})
+		}, sn)
 		b.broadcastSessionsList()
 	case copilot.EventReasoningDelta:
-		b.broadcast(MsgReasoningDelta, ReasoningDeltaPayload{
-			SessionName: evt.SessionName,
+		b.broadcastFiltered(MsgReasoningDelta, ReasoningDeltaPayload{
+			SessionName: sn,
 			ReasoningID: deref(evt.Data.ReasoningID),
 			Content:     deref(evt.Data.Content),
-		})
+		}, sn)
 	case copilot.EventSessionIdle:
 		b.broadcastSessionsList()
 	}
@@ -321,6 +363,12 @@ func (b *Bridge) broadcastSessionsList() {
 }
 
 func (b *Bridge) broadcast(msgType string, payload any) {
+	b.broadcastFiltered(msgType, payload, "")
+}
+
+// broadcastFiltered sends a message to all clients. If sessionName is non-empty,
+// shared clients that are filtering on a different session are skipped.
+func (b *Bridge) broadcastFiltered(msgType string, payload any, sessionName string) {
 	data, err := json.Marshal(BridgeMessage{
 		Type:    msgType,
 		Payload: mustMarshal(payload),
@@ -332,6 +380,10 @@ func (b *Bridge) broadcast(msgType string, payload any) {
 	b.mu.RLock()
 	clients := make([]*wsClient, 0, len(b.clients))
 	for _, c := range b.clients {
+		// Skip shared clients watching a different session.
+		if c.sessionFilter != "" && sessionName != "" && c.sessionFilter != sessionName {
+			continue
+		}
 		clients = append(clients, c)
 	}
 	b.mu.RUnlock()

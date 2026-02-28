@@ -130,6 +130,38 @@ The tunnel can also be started, stopped, and configured directly from the dashbo
 
 The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
 
+### Starting sessions in a repo context
+
+When you create a new session from the dashboard, you can choose a working directory from a dropdown. This dropdown is populated from your tracked repositories — so the Copilot agent starts in the right repo with access to all its files.
+
+To register a repository:
+
+```bash
+# Interactive — prompts for directory, git strategy, etc.
+otto repo add
+
+# Or add with a name
+otto repo add my-project
+```
+
+A tracked repo configuration looks like this in `.otto/otto.jsonc`:
+
+```jsonc
+{
+  "repos": [{
+    "name": "my-project",
+    "primary_dir": "/home/user/repos/my-project",
+    "worktree_dir": "/home/user/repos/my-project-worktrees",
+    "git_strategy": "worktree",
+    "branch_template": "otto/{{.Name}}"
+  }]
+}
+```
+
+If `worktree_dir` is configured, all git worktrees under that directory appear in the dashboard's working directory picker. This lets you spin up a Copilot session pointed at a specific branch or worktree — useful for working on multiple features in parallel from your phone.
+
+Tracked repos are also used by the PR autopilot to map PR branches to local working directories.
+
 ### Session Sharing
 
 Click **🔗 Share** in any active session to generate a read-only link (1-hour default expiry):

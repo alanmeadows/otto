@@ -1,37 +1,48 @@
 # Otto
 
-[![CI](https://github.com/alanmeadows/otto/actions/workflows/ci.yml/badge.svg)](https://github.com/alanmeadows/otto/actions/workflows/ci.yml)
-[![Go Report Card](https://goreportcard.com/badge/github.com/alanmeadows/otto)](https://goreportcard.com/report/github.com/alanmeadows/otto)
-[![Go Reference](https://pkg.go.dev/badge/github.com/alanmeadows/otto.svg)](https://pkg.go.dev/github.com/alanmeadows/otto)
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-
 AI-powered PR lifecycle manager with a Copilot session dashboard.
 
-## Overview
+## Why Otto?
 
-Otto is a Go CLI that orchestrates LLM-driven development workflows through the [GitHub Copilot SDK](https://github.com/github/copilot-sdk). It monitors pull requests for review feedback, automatically fixes build failures, resolves merge conflicts, and responds to code review comments — all powered by LLM coding agents.
+Working with coding agents is powerful, but the surrounding workflow is full of friction. You submit a PR, walk away, and come back to find a failed pipeline, three review comments, a merge conflict, and a MerlinBot policy violation — each requiring you to context-switch back, diagnose, fix, push, and wait again. Meanwhile, your Copilot CLI sessions are trapped in the terminal where you started them.
 
-Otto also includes a **web-based Copilot session dashboard** for managing multiple Copilot CLI sessions from your browser or phone, with Azure DevTunnel support for remote access.
+Otto solves three problems:
 
-Otto is an **LLM orchestrator, not a logic engine** — it delegates reasoning and code generation to LLMs and keeps its own code focused on plumbing, sequencing, and state management.
+### 📱 Drive Copilot from your phone
+
+Otto's web dashboard discovers all your Copilot CLI sessions from `~/.copilot/session-state/`, shows their live status, and lets you resume and interact with them from any browser. Start a session at your desk, pick it up from your phone on the couch. Protected by Entra ID authentication via Azure DevTunnels — only you (or your team) can access it.
+
+### 🔍 Guided PR reviews with a single command
+
+```bash
+otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123 \
+  "focus on error handling, concurrency safety, and resource cleanup"
+```
+
+Not a generic "find bugs" review — you tell otto what to focus on and it applies that lens across the entire diff. The guidance parameter turns a noisy LLM review into a directed expert review that catches the things you actually care about.
+
+### 🤖 Hands-off PR lifecycle management
+
+```bash
+otto pr add https://dev.azure.com/org/project/_git/repo/pullrequest/123
+```
+
+Otto watches your PR continuously. When a pipeline fails, it reads the build logs, classifies the failure (infrastructure vs code), and fixes it. When a reviewer leaves comments, it evaluates each one, fixes the code if it agrees, and replies with its reasoning. When merge conflicts appear, it rebases and resolves them. When MerlinBot flags policy issues, it addresses them. All while you're working on something else.
+
+The goal: submit a PR and let otto get it to green without you babysitting it.
 
 ## Features
 
-- **PR monitoring** — daemon polls PRs for review comments, auto-fixes issues via LLM, and re-pushes (up to configurable max attempts)
-- **PR review** — LLM-powered code review with interactive inline comment posting
+- **PR autopilot** — monitors PRs for pipeline failures, review comments, merge conflicts, and MerlinBot feedback; auto-fixes and re-pushes up to configurable max attempts
+- **Guided PR review** — LLM-powered code review with focus guidance and interactive inline comment posting
 - **Copilot dashboard** — web UI for managing Copilot CLI sessions with real-time streaming, session resume, and live activity monitoring
-- **Session sharing** — generate time-limited read-only links to share a single session's live conversation with colleagues
-- **Remote access** — Azure DevTunnel integration with configurable access control (anonymous, org-scoped, or authenticated)
-- **Session discovery** — automatically discovers persisted sessions from `~/.copilot/session-state/` with live activity timestamps
-- **Shared server** — optionally connect to an existing headless Copilot server for shared session management
+- **Session sharing** — generate time-limited read-only links to share a single session's live conversation
+- **Remote access** — Azure DevTunnel integration with Entra ID, org-scoped, or anonymous access control
+- **Session discovery** — automatically discovers persisted sessions with live activity timestamps
 - **Notifications** — Microsoft Teams webhook notifications for PR events
 - **Multi-provider** — pluggable PR backends for Azure DevOps and GitHub
-- **Repository management** — git worktree and branch strategies for multi-repo workflows
-- **All state on disk** — PRs and config stored as human-readable markdown/JSONC — no databases
 
 ## Installation
-
-### From Source
 
 Requires **Go 1.25.6+** and a [GitHub Copilot subscription](https://github.com/features/copilot).
 
@@ -49,120 +60,112 @@ make install      # installs to ~/.local/bin
 
 ## Quick Start
 
-### 1. Initialize Configuration
+### 1. Configure
 
 ```bash
-# Set LLM models (defaults shown)
-otto config set models.primary "claude-opus-4.6"
-otto config set models.secondary "gpt-5.2-codex"
-
-# Configure a PR provider (GitHub example)
-otto config set pr.default_provider "github"
-otto config set pr.providers.github.token "$GITHUB_TOKEN"
-
-# Or ADO
+# Configure a PR provider
 otto config set pr.default_provider "ado"
 otto config set pr.providers.ado.organization "myorg"
 otto config set pr.providers.ado.project "myproject"
 otto config set pr.providers.ado.pat "$ADO_PAT"
+
+# Or GitHub
+otto config set pr.default_provider "github"
+otto config set pr.providers.github.token "$GITHUB_TOKEN"
 ```
 
-### 2. Start the Dashboard
+### 2. Review a PR with guidance
 
 ```bash
-# Start with the Copilot session dashboard
-otto server start --dashboard
+# Generic review
+otto pr review https://github.com/org/repo/pull/42
 
-# Or with remote access via Azure DevTunnel
-otto server start --dashboard --tunnel
-
-# Enable permanently via config
-otto config set dashboard.enabled true
+# Guided review — tell the LLM what to focus on
+otto pr review https://github.com/org/repo/pull/42 "focus on error handling and race conditions"
+otto pr review https://dev.azure.com/org/proj/_git/repo/pullrequest/123 "check for security issues in input validation"
 ```
 
-Open **http://localhost:4098** in your browser. The dashboard shows:
-- All persisted Copilot CLI sessions from `~/.copilot/session-state/`
-- Live activity timestamps ("30s ago", "5m ago") that update in real time
-- Ability to resume any session and continue the conversation
-- Create new sessions with model selection
-- Real-time streaming of LLM responses, tool calls, and intent changes
+Otto fetches the diff, sends it to the LLM with your guidance, presents review comments in a table, and lets you interactively select which to post as inline comments on the PR.
 
-### 3. Monitor a PR
+### 3. Monitor a PR on autopilot
 
 ```bash
-# Add a PR for tracking
-otto pr add https://github.com/org/repo/pull/42
+# Add a PR for tracking — otto watches it continuously
+otto pr add https://dev.azure.com/org/proj/_git/repo/pullrequest/123
 
-# Start the daemon to auto-monitor
+# Start the daemon
 otto server start
 ```
 
-### 4. Review a PR
+Otto will now poll the PR and automatically:
+- Fix pipeline failures (classifies as infrastructure vs code, retries or fixes accordingly)
+- Respond to review comments (agrees and fixes, or explains why it's by-design)
+- Resolve merge conflicts (rebases and resolves via LLM)
+- Address MerlinBot policy violations (ADO-specific)
+- Send Teams notifications on status changes
+
+### 4. Start the dashboard
 
 ```bash
-otto pr review https://github.com/org/repo/pull/42
+# Local access
+otto server start --dashboard
+
+# Remote access via Azure DevTunnel (Entra ID auth)
+otto server start --dashboard --tunnel
 ```
 
-Otto fetches the diff, runs an LLM review, presents comments in a table, and lets you select which to post as inline comments.
+Open **http://localhost:4098** in your browser. The dashboard shows:
+- All persisted Copilot CLI sessions with live "last activity" timestamps
+- Resume any session and continue the conversation
+- Create new sessions with model selection
+- Real-time streaming of LLM responses and tool calls
+- Share individual sessions via time-limited read-only links
 
 ## Copilot Dashboard
 
 The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
 
-### Features
-
-- **Session discovery** — automatically lists all persisted sessions from `~/.copilot/session-state/` with summaries and live "last activity" timestamps
-- **Session resume** — click any saved session to resume it with full conversation history
-- **New sessions** — create sessions with model selection (Claude, GPT, Gemini)
-- **Real-time chat** — streaming responses with markdown rendering, tool call indicators, and intent tracking
-- **Session sharing** — generate a read-only link (1-hour default expiry) to share a live session with a colleague — they see the conversation stream in real time without access to the full dashboard
-- **Azure DevTunnel** — one-click tunnel setup for remote access from your phone with configurable access control
-- **Mobile responsive** — works on phone browsers with touch-friendly sidebar
-
 ### Session Sharing
 
-Click the **🔗 Share** button in any active session to generate a time-limited read-only link:
+Click **🔗 Share** in any active session to generate a read-only link (1-hour default expiry):
 
 ```
 https://your-tunnel.devtunnels.ms/shared/6548666f0382549d...
 ```
 
-The recipient sees a minimal view with the conversation history streaming live — tool calls, responses, and intent changes — but no ability to send messages or access other sessions. Links expire after 1 hour by default.
+The recipient sees the conversation streaming live — tool calls, responses, intent changes — but no ability to send messages or access other sessions.
 
-### Tunnel Access Control
+### Remote Access with Entra ID
 
-Configure who can access the dashboard when exposed via DevTunnel:
+To access the dashboard from your phone or share it with your team, use Azure DevTunnels with Entra ID authentication:
 
 ```bash
-# Authenticated (default) — only tunnel owner
+# One-time setup: login to devtunnel with your Microsoft/Entra account
+devtunnel user login -e
+
+# Start otto with tunnel
+otto server start --dashboard --tunnel
+```
+
+Configure access control:
+
+```bash
+# Default: only you can access (authenticated via Entra)
 otto config set dashboard.tunnel_access "authenticated"
+
+# Share with your Entra tenant (e.g. all @microsoft.com users)
+otto config set dashboard.tunnel_access "tenant"
 
 # Share with a GitHub org
 otto config set dashboard.tunnel_allow_org "my-github-org"
 
-# Share with your Entra/AAD tenant
-otto config set dashboard.tunnel_access "tenant"
-
-# Public (no login required)
-otto config set dashboard.tunnel_access "anonymous"
-
-# Use a persistent tunnel (stable URL across restarts)
-otto config set dashboard.tunnel_id "otto-dash"
+# Use a persistent tunnel for a stable URL
+otto config set dashboard.tunnel_id "my-otto"
 ```
 
-### Shared Copilot Server
+Access settings are also configurable from the dashboard sidebar under the Tunnel section.
 
-By default, otto spawns its own Copilot CLI process. You can optionally run a shared headless server that otto connects to:
-
-```bash
-# Start a persistent headless copilot server
-copilot --headless --port 4321
-
-# Configure otto to connect to it
-otto config set dashboard.copilot_server "localhost:4321"
-```
-
-This allows otto's dashboard to create and manage sessions through the shared server. Sessions created through the dashboard are accessible to any SDK client connected to the same server.
+> **Note:** The authentication provider (Entra vs GitHub) is determined by how you logged into the devtunnel CLI. Use `devtunnel user login -e` for Entra (Microsoft accounts), or `devtunnel user login -g` for GitHub accounts.
 
 ## Configuration
 
@@ -191,24 +194,16 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `pr.providers.ado.pat` | string | | ADO personal access token |
 | `pr.providers.ado.auto_complete` | bool | `false` | Auto-complete ADO PRs |
 | `pr.providers.ado.merlinbot` | bool | `false` | Enable MerlinBot integration |
-| `pr.providers.ado.create_work_item` | bool | `false` | Create work items for ADO PRs |
 | `pr.providers.github.token` | string | | GitHub personal access token |
-| `server.poll_interval` | string | `10m` | Daemon PR poll interval (Go duration) |
+| `server.poll_interval` | string | `10m` | Daemon PR poll interval |
 | `server.port` | int | `4097` | Daemon HTTP API port |
-| `server.log_dir` | string | `~/.local/share/otto/logs` | Daemon log directory |
 | `dashboard.port` | int | `4098` | Dashboard web server port |
 | `dashboard.enabled` | bool | `false` | Enable the Copilot session dashboard |
 | `dashboard.auto_start_tunnel` | bool | `false` | Auto-start Azure DevTunnel on dashboard start |
 | `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
-| `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated/owner only) |
+| `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated) |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
-| `dashboard.tunnel_allow_emails` | string[] | | Email addresses to grant access (requires org/tenant membership) |
-| `repos[].name` | string | | Repository name |
-| `repos[].primary_dir` | string | | Primary checkout directory |
-| `repos[].worktree_dir` | string | | Worktree directory |
-| `repos[].git_strategy` | string | | Git strategy: `worktree`, `branch`, or `hands-off` |
-| `repos[].branch_template` | string | | Branch name template (e.g. `otto/{{.Name}}`) |
 | `notifications.teams_webhook_url` | string | | Microsoft Teams webhook URL |
 | `notifications.events` | string[] | | Events to notify on |
 
@@ -216,82 +211,66 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 
 | Variable | Description |
 |----------|-------------|
-| `OTTO_ADO_PAT` | Azure DevOps personal access token (alternative to config) |
-| `OTTO_GITHUB_TOKEN` | GitHub personal access token (alternative to config) |
+| `OTTO_ADO_PAT` | Azure DevOps personal access token |
+| `OTTO_GITHUB_TOKEN` | GitHub personal access token |
 
 ## Command Reference
 
 ```
 otto                          LLM-powered PR lifecycle manager
 ├── pr                        Manage pull requests
-│   ├── add <url>             Add a PR for tracking
+│   ├── add <url>             Track a PR for auto-monitoring
 │   ├── list                  List tracked PRs
 │   ├── status [id]           Show PR status
 │   ├── remove [id]           Stop tracking a PR
-│   ├── fix [id]              Fix PR review issues via LLM
+│   ├── fix [id]              Manually trigger LLM fix
 │   ├── log [id]              Show PR activity log
-│   └── review <url>          LLM-powered PR code review
+│   └── review <url> [guide]  LLM-powered PR review with optional focus guidance
 ├── server                    Manage the otto daemon
 │   ├── start                 Start the daemon
 │   │   ├── --dashboard       Enable Copilot session dashboard
 │   │   ├── --tunnel          Auto-start Azure DevTunnel
 │   │   ├── --dashboard-port  Dashboard port (default: 4098)
-│   │   └── --foreground      Run in foreground (don't daemonize)
+│   │   └── --foreground      Run in foreground
 │   ├── stop                  Stop the daemon
 │   ├── status                Show daemon status
 │   └── install               Install as systemd user service
 ├── repo                      Manage repositories
-│   ├── add [name]            Register a repository (interactive)
+│   ├── add [name]            Register a repository
 │   ├── remove <name>         Remove a tracked repository
 │   └── list                  List tracked repositories
-├── worktree                  Manage git worktrees
-│   ├── add <name>            Create a worktree
-│   ├── list                  List worktrees
-│   └── remove <name>         Remove a worktree
 ├── config                    Manage configuration
 │   ├── show [--json]         Show merged configuration
 │   └── set <key> <value>     Set a config value
 └── completion                Generate shell completions
 ```
 
-Use `otto <command> --help` for detailed usage of any command.
-
-## PR Backend Providers
-
-Otto supports pluggable PR backends:
-
-- **Azure DevOps** — full support for PRs, pipeline status, inline comments, and work items. Requires an organization, project, and PAT.
-- **GitHub** — PR tracking, review comments, and inline comments via the GitHub API. Requires a personal access token.
-
-Providers are auto-detected from PR URLs. Configure one or both in the `pr.providers` config section.
-
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ otto server start --dashboard                               │
+│ otto server start --dashboard --tunnel                      │
 │                                                             │
 │  ┌──────────────────┐   ┌───────────────────────────────┐   │
 │  │ PR API (:4097)   │   │ Dashboard (:4098)             │   │
-│  │ PR monitoring    │   │ Static UI (embed.FS)          │   │
-│  │ Auto-fix/review  │   │ REST API + WebSocket          │   │
-│  └──────────────────┘   │ Real-time session streaming   │   │
-│                         └───────────────┬───────────────┘   │
+│  │ PR monitoring    │   │ Web UI + WebSocket streaming  │   │
+│  │ Auto-fix/review  │   │ Session sharing (token-gated) │   │
+│  └──────────────────┘   └───────────────┬───────────────┘   │
 │                                         │                   │
 │  ┌──────────────────────────────────────┴───────────────┐   │
 │  │ Copilot Session Manager (copilot-sdk/go)             │   │
-│  │ Create/resume/stream sessions                        │   │
+│  │ Create · Resume · Stream · Share                     │   │
 │  │ Persisted session discovery (~/.copilot/session-state)│   │
 │  └──────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │ DevTunnel Manager (optional)                         │   │
-│  │ Azure DevTunnel for remote access                    │   │
+│  │ DevTunnel Manager                                    │   │
+│  │ Entra ID / GitHub org / anonymous access control     │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-All LLM interaction goes through the [GitHub Copilot SDK for Go](https://github.com/github/copilot-sdk). Otto manages the Copilot CLI process lifecycle automatically.
+All LLM interaction goes through the [GitHub Copilot SDK for Go](https://github.com/github/copilot-sdk).
 
 ## Development
 
@@ -301,7 +280,6 @@ make test     # Run all tests
 make lint     # Run golangci-lint
 make vet      # Run go vet
 make all      # lint + vet + test + build
-make clean    # Remove build artifacts
 ```
 
 ## License

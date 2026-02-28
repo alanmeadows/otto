@@ -20,7 +20,8 @@ Otto is an **LLM orchestrator, not a logic engine** — it delegates reasoning a
 - **PR monitoring** — daemon polls PRs for review comments, auto-fixes issues via LLM, and re-pushes (up to configurable max attempts)
 - **PR review** — LLM-powered code review with interactive inline comment posting
 - **Copilot dashboard** — web UI for managing Copilot CLI sessions with real-time streaming, session resume, and live activity monitoring
-- **Remote access** — Azure DevTunnel integration to access the dashboard from your phone
+- **Session sharing** — generate time-limited read-only links to share a single session's live conversation with colleagues
+- **Remote access** — Azure DevTunnel integration with configurable access control (anonymous, org-scoped, or authenticated)
 - **Session discovery** — automatically discovers persisted sessions from `~/.copilot/session-state/` with live activity timestamps
 - **Shared server** — optionally connect to an existing headless Copilot server for shared session management
 - **Notifications** — Microsoft Teams webhook notifications for PR events
@@ -114,8 +115,40 @@ The dashboard is a responsive web UI embedded in the otto binary. It connects to
 - **Session resume** — click any saved session to resume it with full conversation history
 - **New sessions** — create sessions with model selection (Claude, GPT, Gemini)
 - **Real-time chat** — streaming responses with markdown rendering, tool call indicators, and intent tracking
-- **Azure DevTunnel** — one-click tunnel setup for remote access from your phone
+- **Session sharing** — generate a read-only link (1-hour default expiry) to share a live session with a colleague — they see the conversation stream in real time without access to the full dashboard
+- **Azure DevTunnel** — one-click tunnel setup for remote access from your phone with configurable access control
 - **Mobile responsive** — works on phone browsers with touch-friendly sidebar
+
+### Session Sharing
+
+Click the **🔗 Share** button in any active session to generate a time-limited read-only link:
+
+```
+https://your-tunnel.devtunnels.ms/shared/6548666f0382549d...
+```
+
+The recipient sees a minimal view with the conversation history streaming live — tool calls, responses, and intent changes — but no ability to send messages or access other sessions. Links expire after 1 hour by default.
+
+### Tunnel Access Control
+
+Configure who can access the dashboard when exposed via DevTunnel:
+
+```bash
+# Authenticated (default) — only tunnel owner
+otto config set dashboard.tunnel_access "authenticated"
+
+# Share with a GitHub org
+otto config set dashboard.tunnel_allow_org "my-github-org"
+
+# Share with your Entra/AAD tenant
+otto config set dashboard.tunnel_access "tenant"
+
+# Public (no login required)
+otto config set dashboard.tunnel_access "anonymous"
+
+# Use a persistent tunnel (stable URL across restarts)
+otto config set dashboard.tunnel_id "otto-dash"
+```
 
 ### Shared Copilot Server
 
@@ -167,6 +200,10 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `dashboard.enabled` | bool | `false` | Enable the Copilot session dashboard |
 | `dashboard.auto_start_tunnel` | bool | `false` | Auto-start Azure DevTunnel on dashboard start |
 | `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
+| `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
+| `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated/owner only) |
+| `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
+| `dashboard.tunnel_allow_emails` | string[] | | Email addresses to grant access (requires org/tenant membership) |
 | `repos[].name` | string | | Repository name |
 | `repos[].primary_dir` | string | | Primary checkout directory |
 | `repos[].worktree_dir` | string | | Worktree directory |

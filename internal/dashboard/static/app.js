@@ -553,6 +553,13 @@ function sendMessage() {
     document.getElementById('send-btn').disabled = true;
 }
 
+function updateTunnelAccessFields() {
+    const mode = document.getElementById('tunnel-access-mode').value;
+    const orgGroup = document.getElementById('tunnel-org-group');
+    // GitHub Org field only makes sense for authenticated mode (not tenant or anonymous)
+    orgGroup.classList.toggle('hidden', mode !== '');
+}
+
 function shareSession() {
     if (!state.activeSession) return;
     fetch('/api/share', {

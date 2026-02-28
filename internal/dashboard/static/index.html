@@ -53,13 +53,13 @@
                             <summary>Access Settings</summary>
                             <div class="form-group">
                                 <label for="tunnel-access-mode">Access</label>
-                                <select id="tunnel-access-mode">
+                                <select id="tunnel-access-mode" onchange="updateTunnelAccessFields()">
                                     <option value="">Authenticated (owner only)</option>
-                                    <option value="tenant">Entra Tenant</option>
+                                    <option value="tenant">Entra Tenant (all @your-org.com)</option>
                                     <option value="anonymous">Anonymous (public)</option>
                                 </select>
                             </div>
-                            <div class="form-group">
+                            <div class="form-group" id="tunnel-org-group">
                                 <label for="tunnel-allow-org">Allow GitHub Org</label>
                                 <input id="tunnel-allow-org" type="text" placeholder="e.g. microsoft">
                             </div>

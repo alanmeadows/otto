@@ -3,6 +3,7 @@ package dashboard
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -180,22 +181,20 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 		slog.Error("failed to create sub FS for static files", "error", err)
 		return
 	}
-	mux.Handle("GET /", http.FileServer(http.FS(staticFS)))
 
-	// REST API.
-	mux.HandleFunc("GET /api/sessions", s.handleListSessions)
-	mux.HandleFunc("POST /api/sessions", s.handleCreateSession)
-	mux.HandleFunc("DELETE /api/sessions/{name}", s.handleDeleteSession)
-	mux.HandleFunc("GET /api/worktrees", s.handleListWorktrees)
-	mux.HandleFunc("GET /api/tunnel/status", s.handleTunnelStatus)
-	mux.HandleFunc("POST /api/tunnel/start", s.handleStartTunnel)
-	mux.HandleFunc("POST /api/tunnel/stop", s.handleStopTunnel)
-	mux.HandleFunc("POST /api/share", s.handleCreateShare)
+	// Dashboard routes — protected by tunnel identity check.
+	mux.Handle("GET /", s.requireDashboardAccess(http.FileServer(http.FS(staticFS))))
+	mux.HandleFunc("GET /api/sessions", s.guardDashboard(s.handleListSessions))
+	mux.HandleFunc("POST /api/sessions", s.guardDashboard(s.handleCreateSession))
+	mux.HandleFunc("DELETE /api/sessions/{name}", s.guardDashboard(s.handleDeleteSession))
+	mux.HandleFunc("GET /api/worktrees", s.guardDashboard(s.handleListWorktrees))
+	mux.HandleFunc("GET /api/tunnel/status", s.guardDashboard(s.handleTunnelStatus))
+	mux.HandleFunc("POST /api/tunnel/start", s.guardDashboard(s.handleStartTunnel))
+	mux.HandleFunc("POST /api/tunnel/stop", s.guardDashboard(s.handleStopTunnel))
+	mux.HandleFunc("POST /api/share", s.guardDashboard(s.handleCreateShare))
+	mux.HandleFunc("GET /ws", s.guardDashboard(s.handleWS))
 
-	// WebSocket.
-	mux.HandleFunc("GET /ws", s.handleWS)
-
-	// Shared session view (read-only, token-gated).
+	// Shared session view — token-gated, NO dashboard auth required.
 	mux.HandleFunc("GET /shared/{token}", s.handleSharedSession)
 	mux.HandleFunc("GET /ws/shared/{token}", s.handleSharedWS)
 }
@@ -330,6 +329,105 @@ func listDirWorktrees(repoName, wtDir string) []WorktreeSummary {
 func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(v)
+}
+
+// --- Dashboard access control via DevTunnel JWT ---
+
+// extractTunnelEmail extracts the user email from the X-Tunnel-Authorization JWT.
+// The JWT is already validated by the DevTunnel infrastructure — we just decode the claims.
+// Returns empty string if no tunnel header is present (local access).
+func extractTunnelEmail(r *http.Request) string {
+	token := r.Header.Get("X-Tunnel-Authorization")
+	if token == "" {
+		return ""
+	}
+	// Strip "tunnel " prefix if present.
+	token = strings.TrimPrefix(token, "tunnel ")
+	// JWT is three base64url-encoded parts separated by dots.
+	parts := strings.Split(token, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var claims struct {
+		Email             string `json:"email"`
+		PreferredUsername string `json:"preferred_username"`
+		UPN               string `json:"upn"`
+		Name              string `json:"name"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil {
+		return ""
+	}
+	// Try email fields in priority order.
+	if claims.Email != "" {
+		return strings.ToLower(claims.Email)
+	}
+	if claims.PreferredUsername != "" {
+		return strings.ToLower(claims.PreferredUsername)
+	}
+	if claims.UPN != "" {
+		return strings.ToLower(claims.UPN)
+	}
+	return ""
+}
+
+// isDashboardAccessAllowed checks if the request should be allowed to access the dashboard.
+// Local requests (no tunnel header) are always allowed.
+// Tunnel requests are checked against owner_email and allowed_users.
+func (s *Server) isDashboardAccessAllowed(r *http.Request) bool {
+	email := extractTunnelEmail(r)
+	if email == "" {
+		// No tunnel header — local access, always allowed.
+		return true
+	}
+
+	// If no allowed_users and no owner_email configured, allow everyone
+	// (the tunnel's own ACL is the only gate).
+	owner := strings.ToLower(s.cfg.Dashboard.OwnerEmail)
+	allowed := s.cfg.Dashboard.AllowedUsers
+	if owner == "" && len(allowed) == 0 {
+		return true
+	}
+
+	// Check owner.
+	if owner != "" && email == owner {
+		return true
+	}
+
+	// Check allowed users list.
+	for _, u := range allowed {
+		if strings.ToLower(u) == email {
+			return true
+		}
+	}
+
+	slog.Warn("dashboard access denied", "email", email)
+	return false
+}
+
+// guardDashboard wraps a HandlerFunc with access control.
+func (s *Server) guardDashboard(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !s.isDashboardAccessAllowed(r) {
+			http.Error(w, "Access denied — your account is not authorized for this dashboard", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
+// requireDashboardAccess wraps an http.Handler with access control.
+func (s *Server) requireDashboardAccess(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !s.isDashboardAccessAllowed(r) {
+			http.Error(w, "Access denied — your account is not authorized for this dashboard", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // watchPersistedSessions polls ~/.copilot/session-state/ for changes and

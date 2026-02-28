@@ -81,14 +81,16 @@ func (s ServerConfig) ParsePollInterval() time.Duration {
 
 // DashboardConfig holds settings for the Copilot session dashboard.
 type DashboardConfig struct {
-	Port            int      `json:"port"`
-	Enabled         bool     `json:"enabled"`
-	AutoStartTunnel bool     `json:"auto_start_tunnel"`
-	CopilotServer   string   `json:"copilot_server"`    // e.g. "localhost:4321" to connect to shared headless server
-	TunnelID        string   `json:"tunnel_id"`          // persistent tunnel name (e.g. "otto-dash"); empty = ephemeral
-	TunnelAccess    string   `json:"tunnel_access"`      // "anonymous", "tenant", or "authenticated" (default)
-	TunnelAllowOrg  string   `json:"tunnel_allow_org"`   // GitHub org to grant access (e.g. "my-org")
-	TunnelAllowEmails []string `json:"tunnel_allow_emails"` // specific email addresses to grant access
+	Port              int      `json:"port"`
+	Enabled           bool     `json:"enabled"`
+	AutoStartTunnel   bool     `json:"auto_start_tunnel"`
+	CopilotServer     string   `json:"copilot_server"`       // e.g. "localhost:4321" to connect to shared headless server
+	TunnelID          string   `json:"tunnel_id"`             // persistent tunnel name (e.g. "otto-dash"); empty = ephemeral
+	TunnelAccess      string   `json:"tunnel_access"`         // "anonymous", "tenant", or "authenticated" (default)
+	TunnelAllowOrg    string   `json:"tunnel_allow_org"`      // GitHub org to grant access (e.g. "my-org")
+	TunnelAllowEmails []string `json:"tunnel_allow_emails"`   // specific email addresses to grant access
+	OwnerEmail        string   `json:"owner_email"`           // dashboard owner email (auto-detected from tunnel JWT if empty)
+	AllowedUsers      []string `json:"allowed_users"`         // emails allowed full dashboard access (e.g. ["alice@microsoft.com"])
 }
 
 // NotificationsConfig holds notification settings.

@@ -29,6 +29,16 @@ func (r *Registry) Detect(url string) (PRBackend, error) {
 	return nil, fmt.Errorf("no registered backend matches URL: %s", url)
 }
 
+// HasBackendFor returns true if any registered backend matches the given URL substring.
+func (r *Registry) HasBackendFor(urlSubstr string) bool {
+	for _, b := range r.backends {
+		if b.MatchesURL("https://" + urlSubstr + "/test") {
+			return true
+		}
+	}
+	return false
+}
+
 // Get looks up a registered backend by its Name().
 func (r *Registry) Get(name string) (PRBackend, error) {
 	for _, b := range r.backends {

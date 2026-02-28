@@ -70,7 +70,16 @@ func (s *Session) SendPrompt(ctx context.Context, prompt string) error {
 		Content:   prompt,
 		Timestamp: time.Now(),
 	})
+	name := s.info.Name
 	s.mu.Unlock()
+
+	// Broadcast user message to other clients.
+	content := prompt
+	s.emit(SessionEvent{
+		Type:        EventUserMessage,
+		SessionName: name,
+		Data:        EventData{Content: &content},
+	})
 
 	_, err := s.session.Send(ctx, sdk.MessageOptions{
 		Prompt: prompt,

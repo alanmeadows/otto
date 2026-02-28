@@ -47,6 +47,7 @@ const (
 	EventSessionIdle   EventType = "session_idle"
 	EventUsageInfo     EventType = "usage_info"
 	EventReasoningDelta EventType = "reasoning_delta"
+	EventUserMessage    EventType = "user_message"
 )
 
 // SessionEvent represents an event emitted by a copilot session.

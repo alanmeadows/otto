@@ -46,6 +46,7 @@ const (
 	MsgWorktreesList  = "worktrees_list"
 	MsgReasoningDelta       = "reasoning_delta"
 	MsgPersistedSessionsList = "persisted_sessions_list"
+	MsgUserMessage          = "user_message"
 )
 
 // Client → Server message types.

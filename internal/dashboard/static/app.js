@@ -93,6 +93,7 @@ function handleMessage(msg) {
         case 'persisted_sessions_list': handlePersistedSessionsList(msg.payload); break;
         case 'reasoning_delta': handleReasoningDelta(msg.payload); break;
         case 'allowed_users_list': handleAllowedUsersList(msg.payload); break;
+        case 'user_message': handleUserMessage(msg.payload); break;
     }
 }
 
@@ -224,10 +225,14 @@ function handleWorktreesList(payload) {
 }
 
 function handleReasoningDelta(payload) {
-    // Could render reasoning blocks; for now just update activity
     if (payload.session_name === state.activeSession) {
         updateActivity('🧠 Reasoning...');
     }
+}
+
+function handleUserMessage(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendChatMessage('user', payload.content, false);
 }
 
 function handlePersistedSessionsList(payload) {
@@ -548,7 +553,8 @@ function sendMessage() {
     const prompt = input.value.trim();
     if (!prompt || !state.activeSession) return;
     send('send_message', { session_name: state.activeSession, prompt });
-    appendChatMessage('user', prompt, false);
+    // Don't append locally — the server broadcasts user_message to all clients
+    // including us, so we'll get it back via handleUserMessage.
     input.value = '';
     input.style.height = 'auto';
     document.getElementById('send-btn').disabled = true;

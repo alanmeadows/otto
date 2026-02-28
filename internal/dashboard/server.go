@@ -369,9 +369,13 @@ func writeJSON(w http.ResponseWriter, v any) {
 func extractTunnelEmail(r *http.Request) string {
 	token := r.Header.Get("X-Tunnel-Authorization")
 	if token == "" {
+		// Also check X-Ms-Client-Principal (another common tunnel header).
+		if r.Header.Get("X-Ms-Client-Principal") != "" {
+			slog.Info("tunnel: X-Ms-Client-Principal header found but X-Tunnel-Authorization missing")
+		}
 		return ""
 	}
-	slog.Debug("tunnel auth header present", "length", len(token), "prefix", token[:min(20, len(token))])
+	slog.Info("tunnel auth header present", "length", len(token))
 	// Strip "tunnel " prefix if present.
 	token = strings.TrimPrefix(token, "tunnel ")
 	// JWT is three base64url-encoded parts separated by dots.

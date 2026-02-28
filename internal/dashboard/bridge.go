@@ -314,6 +314,11 @@ func (b *Bridge) onSessionEvent(evt copilot.SessionEvent) {
 			ReasoningID: deref(evt.Data.ReasoningID),
 			Content:     deref(evt.Data.Content),
 		}, sn)
+	case copilot.EventUserMessage:
+		b.broadcastFiltered(MsgUserMessage, ContentDeltaPayload{
+			SessionName: sn,
+			Content:     deref(evt.Data.Content),
+		}, sn)
 	case copilot.EventSessionIdle:
 		b.broadcastSessionsList()
 	}

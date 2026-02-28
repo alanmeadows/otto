@@ -10,6 +10,7 @@ import (
 "regexp"
 "strings"
 "sync"
+"syscall"
 )
 
 var tunnelURLPattern = regexp.MustCompile(`https://[^\s]*\.devtunnels\.ms[^\s]*`)
@@ -157,6 +158,13 @@ args = append(args, "--allow-anonymous")
 }
 
 cmd := exec.CommandContext(ctx, "devtunnel", args...)
+// Bind the child process lifecycle to otto's process:
+// - Pdeathsig: kernel sends SIGTERM to child when parent dies (prevents orphans)
+// - Setpgid: puts child in its own process group so we can kill the whole tree
+cmd.SysProcAttr = &syscall.SysProcAttr{
+	Pdeathsig: syscall.SIGTERM,
+	Setpgid:   true,
+}
 stdout, err := cmd.StdoutPipe()
 if err != nil {
 cancel()
@@ -240,14 +248,33 @@ m.cmd = nil
 cb := m.onStatusChange
 m.mu.Unlock()
 
-// Cancel context — this sends SIGKILL via exec.CommandContext.
 if cancel != nil {
 cancel()
 }
 
-// Also try explicit kill in case context cancellation isn't enough.
+// Kill the entire process group to ensure no orphaned children.
 if cmd != nil && cmd.Process != nil {
-cmd.Process.Kill()
+pgid, err := syscall.Getpgid(cmd.Process.Pid)
+if err == nil {
+	// Negative PID = kill the process group.
+	syscall.Kill(-pgid, syscall.SIGTERM)
+} else {
+	cmd.Process.Kill()
+}
+// Wait briefly for clean exit.
+done := make(chan struct{})
+go func() { cmd.Wait(); close(done) }()
+select {
+case <-done:
+default:
+	// Force kill after 3 seconds.
+	go func() {
+		<-done // already closed or will be
+	}()
+	if pgid, err := syscall.Getpgid(cmd.Process.Pid); err == nil {
+		syscall.Kill(-pgid, syscall.SIGKILL)
+	}
+}
 }
 
 slog.Info("devtunnel stopped")

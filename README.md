@@ -113,7 +113,7 @@ Otto will now poll the PR and automatically:
 # Local access
 otto server start --dashboard
 
-# Remote access via Azure DevTunnel (Entra ID auth)
+# Or with remote access via Azure DevTunnel
 otto server start --dashboard --tunnel
 ```
 
@@ -123,6 +123,8 @@ Open **http://localhost:4098** in your browser. The dashboard shows:
 - Create new sessions with model selection
 - Real-time streaming of LLM responses and tool calls
 - Share individual sessions via time-limited read-only links
+
+The tunnel can also be started, stopped, and configured directly from the dashboard sidebar — you don't need to use the CLI flags or config commands.
 
 ## Copilot Dashboard
 

@@ -3,7 +3,6 @@ package dashboard
 import (
 	"context"
 	"crypto/rand"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/fs"
@@ -22,14 +21,15 @@ import (
 // Server is the dashboard HTTP server that serves the web UI,
 // REST API, and WebSocket bridge.
 type Server struct {
-	manager     *copilot.Manager
-	bridge      *Bridge
-	tunnelMgr   *tunnel.Manager
-	cfg         *config.Config
-	srv         *http.Server
-	shareTokens map[string]*ShareToken // token -> share info
-	tokenMu     sync.RWMutex
-	ListPRsFn   func() (any, error) // injected by server package to avoid import cycle
+	manager      *copilot.Manager
+	bridge       *Bridge
+	tunnelMgr    *tunnel.Manager
+	cfg          *config.Config
+	srv          *http.Server
+	shareTokens  map[string]*ShareToken // token -> share info
+	tokenMu      sync.RWMutex
+	ListPRsFn    func() (any, error)
+	dashboardKey string // secret key for dashboard access
 }
 
 // ShareToken represents a time-limited share link for a single session.
@@ -60,17 +60,28 @@ func NewServer(cfg *config.Config) *Server {
 		AllowEmails: cfg.Dashboard.TunnelAllowEmails,
 	})
 
+	// Generate a dashboard access key.
+	keyBytes := make([]byte, 16)
+	rand.Read(keyBytes)
+	dashKey := fmt.Sprintf("%x", keyBytes)
+
 	s := &Server{
-		manager:     mgr,
-		bridge:      bridge,
-		tunnelMgr:   tmgr,
-		cfg:         cfg,
+		manager:      mgr,
+		bridge:       bridge,
+		tunnelMgr:    tmgr,
+		cfg:          cfg,
+		dashboardKey: dashKey,
 		shareTokens: make(map[string]*ShareToken),
 	}
 
 	// Wire tunnel status changes into the bridge.
 	tmgr.SetStatusHandler(func(running bool, url string) {
-		bridge.BroadcastTunnelStatus(running, url)
+		keyedURL := ""
+		if running && url != "" {
+			keyedURL = url + "?key=" + dashKey
+			slog.Info("dashboard access URL", "url", keyedURL)
+		}
+		bridge.BroadcastTunnelStatus(running, url, keyedURL)
 	})
 
 	// Wire tunnel and worktree commands from WebSocket to server.
@@ -305,7 +316,11 @@ func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {
 	running, url := s.tunnelMgr.Status()
-	writeJSON(w, TunnelStatusPayload{Running: running, URL: url})
+	p := TunnelStatusPayload{Running: running, URL: url}
+	if running && url != "" {
+		p.KeyedURL = url + "?key=" + s.dashboardKey
+	}
+	writeJSON(w, p)
 }
 
 func (s *Server) handleStartTunnel(w http.ResponseWriter, r *http.Request) {
@@ -381,97 +396,34 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
-// --- Dashboard access control via DevTunnel JWT ---
+// --- Dashboard access control via URL key ---
+//
+// The dashboard is protected by a secret key embedded in the URL query string.
+// When accessed via a tunnel, users must have ?key=<secret> in the URL or
+// a valid otto_key cookie. Without it, they see a passcode prompt.
+// Local access (localhost) always passes without a key.
 
-// extractTunnelEmail extracts the user email from the X-Tunnel-Authorization JWT.
-// The JWT is already validated by the DevTunnel infrastructure — we just decode the claims.
-// Returns empty string if no tunnel header is present (local access).
-func extractTunnelEmail(r *http.Request) string {
-	token := r.Header.Get("X-Tunnel-Authorization")
-	if token == "" {
-		// Also check X-Ms-Client-Principal (another common tunnel header).
-		if r.Header.Get("X-Ms-Client-Principal") != "" {
-			slog.Info("tunnel: X-Ms-Client-Principal header found but X-Tunnel-Authorization missing")
-		}
-		return ""
-	}
-	slog.Info("tunnel auth header present", "length", len(token))
-	// Strip "tunnel " prefix if present.
-	token = strings.TrimPrefix(token, "tunnel ")
-	// JWT is three base64url-encoded parts separated by dots.
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		slog.Debug("tunnel auth: not a JWT", "parts", len(parts))
-		return ""
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		slog.Debug("tunnel auth: base64 decode failed", "error", err)
-		return ""
-	}
-	slog.Debug("tunnel JWT payload", "raw", string(payload))
-	var claims struct {
-		Email             string `json:"email"`
-		PreferredUsername string `json:"preferred_username"`
-		UPN               string `json:"upn"`
-		Name              string `json:"name"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return ""
-	}
-	email := claims.Email
-	if email == "" {
-		email = claims.PreferredUsername
-	}
-	if email == "" {
-		email = claims.UPN
-	}
-	if email != "" {
-		slog.Info("tunnel user identified", "email", strings.ToLower(email), "name", claims.Name)
-	}
-	return strings.ToLower(email)
-}
+const dashboardKeyCookie = "otto_key"
 
-// isDashboardAccessAllowed checks if the request should be allowed to access the dashboard.
-// Local requests (no tunnel header) are always allowed.
-// Tunnel requests are checked against owner_email and allowed_users.
+// isDashboardAccessAllowed checks if the request has the correct dashboard key.
+// Local requests are always allowed. Remote requests need ?key= or cookie.
 func (s *Server) isDashboardAccessAllowed(r *http.Request) bool {
-	// Log all headers from tunnel requests for debugging.
-	if r.Header.Get("X-Forwarded-For") != "" || r.Header.Get("X-Original-Host") != "" {
-		var hdrs []string
-		for name := range r.Header {
-			hdrs = append(hdrs, name)
-		}
-		slog.Info("tunnel request headers", "names", hdrs, "remote", r.RemoteAddr)
-	}
-
-	email := extractTunnelEmail(r)
-	if email == "" {
-		// No tunnel header — local access, always allowed.
+	// Local access — always allowed.
+	host := r.Host
+	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]") {
 		return true
 	}
 
-	// If no allowed_users and no owner_email configured, allow everyone
-	// (the tunnel's own ACL is the only gate).
-	owner := strings.ToLower(s.cfg.Dashboard.OwnerEmail)
-	allowed := s.cfg.Dashboard.AllowedUsers
-	if owner == "" && len(allowed) == 0 {
+	// Check ?key= query param.
+	if r.URL.Query().Get("key") == s.dashboardKey {
 		return true
 	}
 
-	// Check owner.
-	if owner != "" && email == owner {
+	// Check cookie (set after first successful key auth).
+	if c, err := r.Cookie(dashboardKeyCookie); err == nil && c.Value == s.dashboardKey {
 		return true
 	}
 
-	// Check allowed users list.
-	for _, u := range allowed {
-		if strings.ToLower(u) == email {
-			return true
-		}
-	}
-
-	slog.Warn("dashboard access denied", "email", email)
 	return false
 }
 
@@ -479,7 +431,26 @@ func (s *Server) isDashboardAccessAllowed(r *http.Request) bool {
 func (s *Server) guardDashboard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if !s.isDashboardAccessAllowed(r) {
-			http.Error(w, "Access denied — your account is not authorized for this dashboard", http.StatusForbidden)
+			s.serveKeyPrompt(w, r)
+			return
+		}
+		// If they came in with ?key=, set cookie so subsequent requests work
+		// (WebSocket, API calls, etc.) and redirect to clean URL.
+		if key := r.URL.Query().Get("key"); key == s.dashboardKey {
+			http.SetCookie(w, &http.Cookie{
+				Name:     dashboardKeyCookie,
+				Value:    s.dashboardKey,
+				Path:     "/",
+				MaxAge:   86400 * 30, // 30 days
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+			// Redirect to strip key from URL (so it doesn't leak in browser history).
+			clean := *r.URL
+			q := clean.Query()
+			q.Del("key")
+			clean.RawQuery = q.Encode()
+			http.Redirect(w, r, clean.String(), http.StatusFound)
 			return
 		}
 		next(w, r)
@@ -490,11 +461,72 @@ func (s *Server) guardDashboard(next http.HandlerFunc) http.HandlerFunc {
 func (s *Server) requireDashboardAccess(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !s.isDashboardAccessAllowed(r) {
-			http.Error(w, "Access denied — your account is not authorized for this dashboard", http.StatusForbidden)
+			s.serveKeyPrompt(w, r)
+			return
+		}
+		if key := r.URL.Query().Get("key"); key == s.dashboardKey {
+			http.SetCookie(w, &http.Cookie{
+				Name:     dashboardKeyCookie,
+				Value:    s.dashboardKey,
+				Path:     "/",
+				MaxAge:   86400 * 30,
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+			})
+			clean := *r.URL
+			q := clean.Query()
+			q.Del("key")
+			clean.RawQuery = q.Encode()
+			http.Redirect(w, r, clean.String(), http.StatusFound)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// serveKeyPrompt shows a passcode entry page for unauthorized users.
+func (s *Server) serveKeyPrompt(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	fmt.Fprint(w, `<!DOCTYPE html>
+<html><head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Otto Dashboard — Access Required</title>
+<style>
+  body { background: #0d1117; color: #e6edf3; font-family: -apple-system, sans-serif;
+         display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; }
+  .box { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 32px;
+         max-width: 360px; width: 90%; text-align: center; }
+  h2 { margin: 0 0 8px; font-size: 18px; }
+  p { font-size: 13px; color: #8b949e; margin: 0 0 20px; }
+  input { width: 100%; padding: 10px 14px; background: #21262d; border: 1px solid #30363d;
+          border-radius: 8px; color: #e6edf3; font-size: 15px; text-align: center;
+          outline: none; box-sizing: border-box; }
+  input:focus { border-color: #58a6ff; }
+  button { margin-top: 14px; padding: 8px 24px; background: #58a6ff; color: #fff;
+           border: none; border-radius: 8px; font-size: 14px; cursor: pointer; }
+  button:hover { background: #79c0ff; }
+  .err { color: #f85149; font-size: 12px; margin-top: 8px; display: none; }
+</style>
+</head><body>
+<div class="box">
+  <h2>🔐 Otto Dashboard</h2>
+  <p>Enter the access key to continue</p>
+  <input id="key" type="password" placeholder="Passcode" autocomplete="off">
+  <div class="err" id="err">Invalid passcode</div>
+  <br><button onclick="tryKey()">Enter</button>
+</div>
+<script>
+document.getElementById('key').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') tryKey();
+});
+function tryKey() {
+  var k = document.getElementById('key').value.trim();
+  if (!k) return;
+  window.location.href = '/?key=' + encodeURIComponent(k);
+}
+</script>
+</body></html>`)
 }
 
 // watchPersistedSessions polls ~/.copilot/session-state/ for changes and

@@ -471,8 +471,12 @@ func (b *Bridge) sendTo(client *wsClient, msgType string, payload any) {
 }
 
 // BroadcastTunnelStatus sends tunnel status to all clients.
-func (b *Bridge) BroadcastTunnelStatus(running bool, url string) {
-	b.broadcast(MsgTunnelStatus, TunnelStatusPayload{Running: running, URL: url})
+func (b *Bridge) BroadcastTunnelStatus(running bool, url string, keyedURL ...string) {
+	p := TunnelStatusPayload{Running: running, URL: url}
+	if len(keyedURL) > 0 {
+		p.KeyedURL = keyedURL[0]
+	}
+	b.broadcast(MsgTunnelStatus, p)
 }
 
 // BroadcastWorktrees sends the worktrees list to all clients.

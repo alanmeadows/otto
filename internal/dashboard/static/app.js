@@ -207,12 +207,6 @@ function handleError(payload) {
     updateSessionState(payload.session_name, 'error');
 }
 
-function handleTunnelStatus(payload) {
-    state.tunnelRunning = payload.running;
-    state.tunnelURL = payload.url || '';
-    renderTunnelStatus();
-}
-
 function handleWorktreesList(payload) {
     const select = document.getElementById('session-workdir');
     select.innerHTML = '<option value="">Default (current directory)</option>';
@@ -316,6 +310,13 @@ function resumePersistedSession(sessionId) {
     }, 2000);
 }
 
+function handleTunnelStatus(payload) {
+    state.tunnelRunning = payload.running;
+    state.tunnelURL = payload.url || '';
+    state.tunnelKeyedURL = payload.keyed_url || '';
+    renderTunnelStatus();
+}
+
 function renderTunnelStatus() {
     const activeEl = document.getElementById('tunnel-active');
     const inactiveEl = document.getElementById('tunnel-inactive');
@@ -325,7 +326,8 @@ function renderTunnelStatus() {
     if (state.tunnelRunning && state.tunnelURL) {
         activeEl.classList.remove('hidden');
         inactiveEl.classList.add('hidden');
-        urlInput.value = state.tunnelURL;
+        // Show the keyed URL so user can copy-paste and auto-authenticate.
+        urlInput.value = state.tunnelKeyedURL || state.tunnelURL;
         badge.classList.remove('hidden');
         badge.textContent = '🔗 Tunnel';
         badge.title = state.tunnelURL;

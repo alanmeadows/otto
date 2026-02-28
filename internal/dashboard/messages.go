@@ -138,8 +138,9 @@ type ErrorPayload struct {
 }
 
 type TunnelStatusPayload struct {
-	Running bool   `json:"running"`
-	URL     string `json:"url"`
+	Running  bool   `json:"running"`
+	URL      string `json:"url"`
+	KeyedURL string `json:"keyed_url,omitempty"`
 }
 
 type WorktreesListPayload struct {

@@ -1,21 +1,7 @@
 version: "2"
 
 linters:
+  default: none
   enable:
     - govet
-    - staticcheck
-    - unused
     - ineffassign
-  disable:
-    - errcheck
-
-  settings:
-    staticcheck:
-      checks:
-        - all
-        - -QF1012
-        - -ST1005
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0

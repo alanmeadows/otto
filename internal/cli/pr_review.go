@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
 
@@ -67,10 +69,15 @@ in the worker pool".`,
 
 		fmt.Fprintf(cmd.OutOrStdout(), "Reviewing PR #%s: %s\n", prInfo.ID, prInfo.Title)
 
-		// Step 3: Map to local repo — fetch + checkout source branch.
+		// Step 3: Map to local repo, or clone to temp dir for untracked repos.
 		workDir, cleanup, err := repo.MapPRToWorkDir(appConfig, prInfo.URL, prInfo.SourceBranch)
 		if err != nil {
-			return fmt.Errorf("mapping PR to workdir: %w", err)
+			// Repo not tracked locally — clone to a temp directory for review.
+			slog.Info("repo not tracked locally, cloning to temp dir for review")
+			workDir, cleanup, err = cloneForReview(prInfo)
+			if err != nil {
+				return fmt.Errorf("cloning repo for review: %w", err)
+			}
 		}
 		if cleanup != nil {
 			defer cleanup()
@@ -230,4 +237,59 @@ func truncateStr(s string, maxLen int) string {
 		return s
 	}
 	return s[:maxLen-3] + "..."
+}
+
+// cloneForReview clones a PR's repo to a temp directory and checks out the source branch.
+func cloneForReview(prInfo *provider.PRInfo) (string, func(), error) {
+// Derive clone URL from PR URL.
+cloneURL := deriveCloneURL(prInfo.URL)
+if cloneURL == "" {
+return "", nil, fmt.Errorf("cannot derive clone URL from PR URL: %s", prInfo.URL)
+}
+
+// Create temp directory.
+tmpDir, err := os.MkdirTemp("", "otto-review-*")
+if err != nil {
+return "", nil, fmt.Errorf("creating temp dir: %w", err)
+}
+cleanup := func() { os.RemoveAll(tmpDir) }
+
+// Clone.
+slog.Info("cloning repo for review", "url", cloneURL, "branch", prInfo.SourceBranch)
+cmd := exec.Command("git", "clone", "--depth", "50", "--branch", prInfo.SourceBranch, cloneURL, tmpDir)
+cmd.Stderr = os.Stderr
+if err := cmd.Run(); err != nil {
+cleanup()
+return "", nil, fmt.Errorf("git clone failed: %w", err)
+}
+
+// Fetch the target branch for diff.
+fetchCmd := exec.Command("git", "fetch", "origin", prInfo.TargetBranch)
+fetchCmd.Dir = tmpDir
+fetchCmd.Run() // best effort
+
+return tmpDir, cleanup, nil
+}
+
+// deriveCloneURL extracts a git clone URL from a PR web URL.
+func deriveCloneURL(prURL string) string {
+// GitHub: https://github.com/owner/repo/pull/123 -> https://github.com/owner/repo.git
+if strings.Contains(prURL, "github.com") {
+parts := strings.Split(prURL, "/")
+for i, p := range parts {
+if p == "pull" && i >= 2 {
+return strings.Join(parts[:i], "/") + ".git"
+}
+}
+}
+// ADO: https://dev.azure.com/org/project/_git/repo/pullrequest/123
+if strings.Contains(prURL, "dev.azure.com") || strings.Contains(prURL, "visualstudio.com") {
+parts := strings.Split(prURL, "/")
+for i, p := range parts {
+if p == "pullrequest" && i >= 1 {
+return strings.Join(parts[:i], "/")
+}
+}
+}
+return ""
 }

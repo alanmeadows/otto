@@ -245,35 +245,75 @@ func truncateStr(s string, maxLen int) string {
 }
 
 // cloneForReview clones a PR's repo to a temp directory and checks out the source branch.
+// If the source branch has been deleted (merged PR), falls back to the PR ref.
 func cloneForReview(prInfo *provider.PRInfo) (string, func(), error) {
-// Derive clone URL from PR URL.
-cloneURL := deriveCloneURL(prInfo.URL)
-if cloneURL == "" {
-return "", nil, fmt.Errorf("cannot derive clone URL from PR URL: %s", prInfo.URL)
+	cloneURL := deriveCloneURL(prInfo.URL)
+	if cloneURL == "" {
+		return "", nil, fmt.Errorf("cannot derive clone URL from PR URL: %s", prInfo.URL)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "otto-review-*")
+	if err != nil {
+		return "", nil, fmt.Errorf("creating temp dir: %w", err)
+	}
+	cleanup := func() { os.RemoveAll(tmpDir) }
+
+	// Try cloning the source branch directly.
+	slog.Info("cloning repo for review", "url", cloneURL, "branch", prInfo.SourceBranch)
+	cmd := exec.Command("git", "clone", "--depth", "50", "--branch", prInfo.SourceBranch, cloneURL, tmpDir)
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		// Source branch deleted (merged PR) — clone default branch and fetch PR ref.
+		slog.Info("source branch not found, trying PR ref", "branch", prInfo.SourceBranch)
+		os.RemoveAll(tmpDir)
+		os.MkdirAll(tmpDir, 0755)
+
+		cloneCmd := exec.Command("git", "clone", "--depth", "50", cloneURL, tmpDir)
+		cloneCmd.Stderr = os.Stderr
+		if err := cloneCmd.Run(); err != nil {
+			cleanup()
+			return "", nil, fmt.Errorf("git clone failed: %w", err)
+		}
+
+		// Fetch the PR head ref (GitHub: refs/pull/N/head).
+		prRef := derivePRRef(prInfo)
+		if prRef != "" {
+			fetchCmd := exec.Command("git", "fetch", "origin", prRef)
+			fetchCmd.Dir = tmpDir
+			fetchCmd.Stderr = os.Stderr
+			if err := fetchCmd.Run(); err != nil {
+				slog.Warn("failed to fetch PR ref", "ref", prRef, "error", err)
+			} else {
+				// Checkout the fetched PR head.
+				coCmd := exec.Command("git", "checkout", "FETCH_HEAD")
+				coCmd.Dir = tmpDir
+				coCmd.Run()
+			}
+		}
+	}
+
+	// Fetch the target branch for diff context.
+	fetchTarget := exec.Command("git", "fetch", "origin", prInfo.TargetBranch)
+	fetchTarget.Dir = tmpDir
+	fetchTarget.Run() // best effort
+
+	return tmpDir, cleanup, nil
 }
 
-// Create temp directory.
-tmpDir, err := os.MkdirTemp("", "otto-review-*")
-if err != nil {
-return "", nil, fmt.Errorf("creating temp dir: %w", err)
-}
-cleanup := func() { os.RemoveAll(tmpDir) }
-
-// Clone.
-slog.Info("cloning repo for review", "url", cloneURL, "branch", prInfo.SourceBranch)
-cmd := exec.Command("git", "clone", "--depth", "50", "--branch", prInfo.SourceBranch, cloneURL, tmpDir)
-cmd.Stderr = os.Stderr
-if err := cmd.Run(); err != nil {
-cleanup()
-return "", nil, fmt.Errorf("git clone failed: %w", err)
-}
-
-// Fetch the target branch for diff.
-fetchCmd := exec.Command("git", "fetch", "origin", prInfo.TargetBranch)
-fetchCmd.Dir = tmpDir
-fetchCmd.Run() // best effort
-
-return tmpDir, cleanup, nil
+// derivePRRef returns the git ref for fetching a PR's head commits.
+func derivePRRef(prInfo *provider.PRInfo) string {
+	// GitHub: refs/pull/<number>/head
+	if strings.Contains(prInfo.URL, "github.com") {
+		// Extract PR number from URL.
+		parts := strings.Split(prInfo.URL, "/")
+		for i, p := range parts {
+			if p == "pull" && i+1 < len(parts) {
+				return "refs/pull/" + parts[i+1] + "/head"
+			}
+		}
+	}
+	// ADO: the source branch ref is usually preserved even after merge.
+	return ""
 }
 
 // deriveCloneURL extracts a git clone URL from a PR web URL.

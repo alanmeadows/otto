@@ -71,7 +71,14 @@ func buildRegistry() *provider.Registry {
 	// Always register GitHub as a fallback — it can auth via GITHUB_TOKEN
 	// env var or gh CLI, and should match any github.com URL.
 	if !reg.HasBackendFor("github.com") {
-		ghBack := ghbackend.NewBackend("", "", os.Getenv("GITHUB_TOKEN"))
+		token := os.Getenv("GITHUB_TOKEN")
+		if token == "" {
+			// Try gh CLI auth token.
+			if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+				token = strings.TrimSpace(string(out))
+			}
+		}
+		ghBack := ghbackend.NewBackend("", "", token)
 		reg.Register(ghBack)
 	}
 

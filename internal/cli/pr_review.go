@@ -224,7 +224,7 @@ func postReviewComments(ctx context.Context, w io.Writer, backend provider.PRBac
 		inline := provider.InlineComment{
 			FilePath: c.File,
 			Line:     c.Line,
-			Body:     fmt.Sprintf("**[%s]** %s", strings.ToUpper(c.Severity), c.Body),
+			Body:     c.Body,
 			Side:     "right",
 		}
 		if err := backend.PostInlineComment(ctx, prInfo, inline); err != nil {

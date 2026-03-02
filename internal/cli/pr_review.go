@@ -127,6 +127,11 @@ in the worker pool".`,
 			return fmt.Errorf("review prompt failed: %w", err)
 		}
 
+		slog.Info("review response", "content_length", len(resp.Content))
+		if len(resp.Content) == 0 {
+			slog.Warn("LLM returned empty response for PR review")
+		}
+
 		// Step 7: Parse JSON response.
 		comments, err := llm.ParseJSONResponse[[]reviewComment](ctx, llmClient, session.ID, resp.Content)
 		if err != nil {

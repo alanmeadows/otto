@@ -111,6 +111,11 @@ func (c *CopilotClient) SendPrompt(ctx context.Context, sessionID string, prompt
 		content = *resp.Data.Content
 	}
 
+	slog.Info("LLM prompt completed", "session", sessionID, "response_length", len(content), "response_nil", resp == nil)
+	if len(content) > 0 {
+		slog.Debug("LLM response preview", "first_200", content[:min(200, len(content))])
+	}
+
 	return &PromptResponse{Content: content}, nil
 }
 

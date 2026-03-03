@@ -479,6 +479,29 @@ func submitPR(ctx context.Context, cmd *cobra.Command, titleOverride, targetBran
 	}
 	if existingPR != nil {
 		fmt.Fprintf(w, "PR already exists: %s\n", existingPR.URL)
+		// Trigger work item creation if configured (same as Step 9 for new PRs).
+		if adoCfg, ok := appConfig.PR.Providers[providerName]; ok && adoCfg.CreateWorkItem {
+			if adoBackend, ok := backend.(*ado.Backend); ok {
+				areaPath := adoCfg.WorkItemAreaPath
+				if areaPath == "" {
+					areaPath = `One\AzureStack\ASZ-VM self service`
+				}
+				triggerBody := fmt.Sprintf("copilot: generateworkitem | areapath: %s", areaPath)
+				fmt.Fprintf(w, "Posting work item trigger comment...\n")
+				threadID, err := adoBackend.PostCommentThread(ctx, existingPR, triggerBody)
+				if err != nil {
+					slog.Warn("failed to post work item trigger comment", "error", err)
+					fmt.Fprintf(w, "  ⚠ Work item trigger failed: %v\n", err)
+				} else {
+					fmt.Fprintf(w, "  ✓ Work item trigger posted (thread %s)\n", threadID)
+					if err := adoBackend.UpdateThreadStatus(ctx, existingPR, threadID, "closed"); err != nil {
+						slog.Warn("failed to close work item trigger thread", "threadID", threadID, "error", err)
+					} else {
+						fmt.Fprintf(w, "  ✓ Closed work item trigger thread\n")
+					}
+				}
+			}
+		}
 		if !noMonitor {
 			registerPRForMonitoring(w, existingPR, providerName)
 		}

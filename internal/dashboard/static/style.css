@@ -586,3 +586,38 @@ body {
 
     #chat-input-area { padding: 8px 12px; }
 }
+
+/* PR list */
+.pr-item {
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 4px;
+    transition: background 0.15s;
+}
+.pr-item:hover { background: var(--bg-hover); }
+.pr-link {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    text-decoration: none;
+    color: var(--text-primary);
+    font-size: 13px;
+    font-weight: 500;
+}
+.pr-link:hover { text-decoration: underline; }
+.pr-status-icon { flex-shrink: 0; font-size: 12px; }
+.pr-title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pr-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding-left: 20px;
+}
+.pr-waiting { color: var(--yellow); }

@@ -2,9 +2,11 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -100,14 +102,24 @@ func forkDaemon(port int, logDir string) error {
 
 	logFile := filepath.Join(logDir, "ottod.log")
 
+	// Determine dashboard port for URL output.
+	dashboardEnabled := os.Getenv("OTTO_DASHBOARD") == "1"
+	tunnelEnabled := os.Getenv("OTTO_TUNNEL") == "1"
+	dashPort := 4098
+	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			dashPort = p
+		}
+	}
+
 	// Fork: re-exec with --foreground, propagating port and dashboard flags.
 	forkArgs := []string{"server", "start", "--foreground", "--port", strconv.Itoa(port)}
 
 	// Check environment for dashboard flags (set by CLI layer).
-	if os.Getenv("OTTO_DASHBOARD") == "1" {
+	if dashboardEnabled {
 		forkArgs = append(forkArgs, "--dashboard")
 	}
-	if os.Getenv("OTTO_TUNNEL") == "1" {
+	if tunnelEnabled {
 		forkArgs = append(forkArgs, "--tunnel")
 	}
 	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
@@ -143,7 +155,57 @@ func forkDaemon(port int, logDir string) error {
 
 	fmt.Printf("daemon started (PID: %d)\n", pid)
 	fmt.Printf("log file: %s\n", logFile)
+	fmt.Printf("server: http://localhost:%d\n", port)
+	if dashboardEnabled {
+		fmt.Printf("dashboard: http://localhost:%d\n", dashPort)
+	}
+
+	// If tunnel is enabled, poll the dashboard API for the tunnel URL.
+	if dashboardEnabled && tunnelEnabled {
+		if tunnelURL := pollTunnelURL(dashPort); tunnelURL != "" {
+			fmt.Printf("tunnel: %s\n", tunnelURL)
+		} else {
+			fmt.Printf("tunnel: starting (check 'otto server logs' if it doesn't come up)\n")
+		}
+	}
+
 	return nil
+}
+
+// pollTunnelURL polls the dashboard's tunnel status API until the tunnel URL
+// is available or the timeout expires. Localhost requests bypass dashboard auth.
+func pollTunnelURL(dashPort int) string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	url := fmt.Sprintf("http://localhost:%d/api/tunnel/status", dashPort)
+
+	// Give the forked server time to start listening.
+	time.Sleep(1 * time.Second)
+	for i := 0; i < 28; i++ { // 1s initial + 28 × 500ms = 15s max
+		resp, err := client.Get(url)
+		if err != nil {
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		var status struct {
+			Running  bool   `json:"running"`
+			URL      string `json:"url"`
+			KeyedURL string `json:"keyed_url"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+			resp.Body.Close()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		resp.Body.Close()
+		if status.KeyedURL != "" {
+			return status.KeyedURL
+		}
+		if status.URL != "" {
+			return status.URL
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return ""
 }
 
 func runForeground(port int, logDir string) error {

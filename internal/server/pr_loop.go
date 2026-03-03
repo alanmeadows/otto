@@ -24,27 +24,27 @@ import (
 
 // PRDocument represents a tracked pull request with its lifecycle state.
 type PRDocument struct {
-	ID             string   `yaml:"id"`
-	Title          string   `yaml:"title"`
-	Provider       string   `yaml:"provider"`
-	Repo           string   `yaml:"repo"`
-	Branch         string   `yaml:"branch"`
-	Target         string   `yaml:"target"`
-	Status         string   `yaml:"status"` // watching, fixing, green, failed, merged, abandoned
-	URL            string   `yaml:"url"`
-	Created        string   `yaml:"created"`
-	LastChecked    string   `yaml:"last_checked"`
-	FixAttempts    int      `yaml:"fix_attempts"`
-	MaxFixAttempts int      `yaml:"max_fix_attempts"`
-	SeenCommentIDs []string `yaml:"seen_comment_ids"`
-	Body           string   `yaml:"-"` // markdown body (fix history, etc.)
+	ID             string   `yaml:"id" json:"id"`
+	Title          string   `yaml:"title" json:"title"`
+	Provider       string   `yaml:"provider" json:"provider"`
+	Repo           string   `yaml:"repo" json:"repo"`
+	Branch         string   `yaml:"branch" json:"branch"`
+	Target         string   `yaml:"target" json:"target"`
+	Status         string   `yaml:"status" json:"status"` // watching, fixing, green, failed, merged, abandoned
+	URL            string   `yaml:"url" json:"url"`
+	Created        string   `yaml:"created" json:"created"`
+	LastChecked    string   `yaml:"last_checked" json:"last_checked"`
+	FixAttempts    int      `yaml:"fix_attempts" json:"fix_attempts"`
+	MaxFixAttempts int      `yaml:"max_fix_attempts" json:"max_fix_attempts"`
+	SeenCommentIDs []string `yaml:"seen_comment_ids" json:"-"`
+	Body           string   `yaml:"-" json:"-"` // markdown body (fix history, etc.)
 
 	// Stage tracking fields — give visibility into what the PR is waiting on.
-	MerlinBotDone bool   `yaml:"merlinbot_done"` // true once MerlinBot comments are addressed
-	FeedbackDone  bool   `yaml:"feedback_done"`  // true once all review comments are resolved
-	PipelineState string `yaml:"pipeline_state"` // pending, running, succeeded, failed, unknown
-	HasConflicts  bool   `yaml:"has_conflicts"`  // true when ADO reports merge conflicts
-	WaitingOn     string `yaml:"waiting_on"`     // human-readable: "merlinbot", "pipelines", "feedback", "all clear"
+	MerlinBotDone bool   `yaml:"merlinbot_done" json:"merlinbot_done"` // true once MerlinBot comments are addressed
+	FeedbackDone  bool   `yaml:"feedback_done" json:"feedback_done"`  // true once all review comments are resolved
+	PipelineState string `yaml:"pipeline_state" json:"pipeline_state"` // pending, running, succeeded, failed, unknown
+	HasConflicts  bool   `yaml:"has_conflicts" json:"has_conflicts"`  // true when ADO reports merge conflicts
+	WaitingOn     string `yaml:"waiting_on" json:"waiting_on"`     // human-readable: "merlinbot", "pipelines", "feedback", "all clear"
 }
 
 // ComputeWaitingOn derives the WaitingOn string from the stage tracking fields.

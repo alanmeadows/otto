@@ -163,6 +163,15 @@ func NewServer(cfg *config.Config) *Server {
 		}
 	}
 
+	bridge.onGetTunnelStatus = func() TunnelStatusPayload {
+		running, url := tmgr.Status()
+		p := TunnelStatusPayload{Running: running, URL: url}
+		if running && url != "" {
+			p.KeyedURL = url + "?key=" + dashKey
+		}
+		return p
+	}
+
 	return s
 }
 

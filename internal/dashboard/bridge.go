@@ -25,6 +25,7 @@ type Bridge struct {
 	onAddAllowedUser    func(string)
 	onRemoveAllowedUser func(string)
 	onGetAllowedUsers   func() AllowedUsersListPayload
+	onGetTunnelStatus   func() TunnelStatusPayload
 }
 
 type wsClient struct {
@@ -70,6 +71,7 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	b.sendSessionsList(client)
 	b.sendPersistedSessions(client)
 	b.sendAllowedUsers(client)
+	b.sendTunnelStatus(client)
 
 	// Read loop — handle client commands.
 	b.readLoop(ctx, id, client)
@@ -393,6 +395,12 @@ func (b *Bridge) broadcastPersistedSessions() {
 func (b *Bridge) sendAllowedUsers(client *wsClient) {
 	if b.onGetAllowedUsers != nil {
 		b.sendTo(client, MsgAllowedUsersList, b.onGetAllowedUsers())
+	}
+}
+
+func (b *Bridge) sendTunnelStatus(client *wsClient) {
+	if b.onGetTunnelStatus != nil {
+		b.sendTo(client, MsgTunnelStatus, b.onGetTunnelStatus())
 	}
 }
 

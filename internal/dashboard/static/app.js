@@ -5,9 +5,11 @@ const state = {
     ws: null,
     sessions: [],
     persistedSessions: [],
+    trackedPRs: [],
     activeSession: null,
     reconnectDelay: 1000,
     reconnectTimer: null,
+    prPollTimer: null,
     streamingContent: {},  // sessionName -> accumulated content
     renderedMessageCount: 0,  // how many history messages we've rendered
     tunnelRunning: false,
@@ -28,6 +30,10 @@ function connect() {
         setConnectionStatus('connected');
         state.reconnectDelay = 1000;
         send('get_sessions', {});
+        fetchPRs();
+        // Refresh PRs every 60 seconds.
+        if (state.prPollTimer) clearInterval(state.prPollTimer);
+        state.prPollTimer = setInterval(fetchPRs, 60000);
     };
 
     ws.onmessage = (evt) => {
@@ -41,6 +47,7 @@ function connect() {
 
     ws.onclose = () => {
         setConnectionStatus('disconnected');
+        if (state.prPollTimer) { clearInterval(state.prPollTimer); state.prPollTimer = null; }
         scheduleReconnect();
     };
 
@@ -336,6 +343,79 @@ function renderTunnelStatus() {
         inactiveEl.classList.remove('hidden');
         badge.classList.add('hidden');
     }
+}
+
+// --- Tracked PRs ---
+
+function escapeHtml(str) {
+    if (!str) return '';
+    return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function fetchPRs() {
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/prs' + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url)
+        .then(r => r.json())
+        .then(prs => {
+            state.trackedPRs = prs || [];
+            renderPRs();
+        })
+        .catch(() => {
+            state.trackedPRs = [];
+            renderPRs();
+        });
+}
+
+function renderPRs() {
+    const container = document.getElementById('pr-list');
+    if (!state.trackedPRs || state.trackedPRs.length === 0) {
+        container.innerHTML = '<div class="empty-hint" style="color:var(--text-muted);font-size:0.85em;padding:0.3em 0.5em">No tracked PRs</div>';
+        return;
+    }
+    container.innerHTML = '';
+    for (const pr of state.trackedPRs) {
+        const el = document.createElement('div');
+        el.className = 'pr-item';
+        const statusIcon = prStatusIcon(pr.status, pr.pipeline_state);
+        const waitingOn = prWaitingOn(pr);
+        el.innerHTML = `
+            <a href="${escapeHtml(pr.url)}" target="_blank" rel="noopener" class="pr-link" title="${escapeHtml(pr.title)}">
+                <span class="pr-status-icon">${statusIcon}</span>
+                <span class="pr-title">${escapeHtml(pr.title || 'PR #' + pr.id)}</span>
+            </a>
+            <div class="pr-meta">
+                <span class="pr-id">#${escapeHtml(pr.id)}</span>
+                <span class="pr-repo">${escapeHtml(pr.repo || '')}</span>
+                ${waitingOn ? `<span class="pr-waiting">${escapeHtml(waitingOn)}</span>` : ''}
+            </div>`;
+        container.appendChild(el);
+    }
+}
+
+function prStatusIcon(status, pipelineState) {
+    switch (status) {
+        case 'merged': return '✅';
+        case 'abandoned': return '🚫';
+        case 'fixing': return '🔧';
+        case 'failed': return '❌';
+        case 'green': return '🟢';
+        default:
+            if (pipelineState === 'failed') return '❌';
+            if (pipelineState === 'inProgress' || pipelineState === 'running') return '⏳';
+            return '👁️';
+    }
+}
+
+function prWaitingOn(pr) {
+    const parts = [];
+    if (pr.status === 'merged') return 'merged';
+    if (pr.status === 'abandoned') return 'abandoned';
+    if (pr.has_conflicts) parts.push('conflicts');
+    if (pr.pipeline_state && pr.pipeline_state !== 'succeeded') parts.push('pipeline');
+    if (!pr.feedback_done) parts.push('feedback');
+    if (!pr.merlinbot_done) parts.push('merlinbot');
+    return parts.length > 0 ? parts.join(', ') : '';
 }
 
 // --- Chat rendering ---

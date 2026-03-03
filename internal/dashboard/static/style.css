@@ -552,17 +552,17 @@ body {
     margin-bottom: 4px;
     transition: background 0.15s;
 }
+.pr-item { cursor: pointer; }
 .pr-item:hover { background: var(--bg-hover); }
-.pr-link {
+.pr-item.active { background: var(--bg-tertiary); border: 1px solid var(--accent); }
+.pr-item-header {
     display: flex;
     align-items: center;
     gap: 6px;
-    text-decoration: none;
-    color: var(--text-primary);
     font-size: 13px;
     font-weight: 500;
+    color: var(--text-primary);
 }
-.pr-link:hover { text-decoration: underline; }
 .pr-status-icon { flex-shrink: 0; font-size: 12px; }
 .pr-title {
     white-space: nowrap;
@@ -579,3 +579,56 @@ body {
     padding-left: 20px;
 }
 .pr-waiting { color: var(--yellow); }
+
+/* PR detail view */
+#pr-detail-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+#pr-detail-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+.pr-detail-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.pr-detail-title-row h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.pr-detail-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 8px;
+}
+.pr-detail-tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-secondary);
+}
+.pr-detail-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--text-primary);
+}
+.pr-detail-body h1 { font-size: 20px; margin: 16px 0 8px; border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.pr-detail-body h2 { font-size: 17px; margin: 14px 0 6px; }
+.pr-detail-body h3 { font-size: 14px; margin: 12px 0 4px; color: var(--accent); }
+.pr-detail-body code { background: var(--bg-tertiary); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+.pr-detail-body ul { padding-left: 20px; margin: 4px 0; }
+.pr-detail-body li { margin: 2px 0; }

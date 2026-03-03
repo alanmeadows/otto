@@ -247,6 +247,21 @@ func FindPR(id string) (*PRDocument, error) {
 	}
 }
 
+// PRDetailResponse wraps PRDocument with the body included in JSON.
+type PRDetailResponse struct {
+	*PRDocument
+	Body string `json:"body"`
+}
+
+// FindPRDetail returns a PR by ID with body included for the dashboard detail view.
+func FindPRDetail(id string) (*PRDetailResponse, error) {
+	pr, err := FindPR(id)
+	if err != nil {
+		return nil, err
+	}
+	return &PRDetailResponse{PRDocument: pr, Body: pr.Body}, nil
+}
+
 // InferPR returns the single tracked PR if only one exists, or errors with guidance.
 func InferPR() (*PRDocument, error) {
 	prs, err := ListPRs()

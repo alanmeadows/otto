@@ -29,6 +29,7 @@ type Server struct {
 	shareTokens  map[string]*ShareToken // token -> share info
 	tokenMu      sync.RWMutex
 	ListPRsFn    func() (any, error)
+	GetPRFn      func(id string) (any, error)
 	dashboardKey string // secret key for dashboard access
 }
 
@@ -240,6 +241,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/sessions/{name}", s.guardDashboard(s.handleDeleteSession))
 	mux.HandleFunc("GET /api/worktrees", s.guardDashboard(s.handleListWorktrees))
 	mux.HandleFunc("GET /api/prs", s.guardDashboard(s.handleListPRs))
+	mux.HandleFunc("GET /api/prs/{id}", s.guardDashboard(s.handleGetPR))
 	mux.HandleFunc("GET /api/repos", s.guardDashboard(s.handleListRepos))
 	mux.HandleFunc("GET /api/tunnel/status", s.guardDashboard(s.handleTunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/start", s.guardDashboard(s.handleStartTunnel))
@@ -317,6 +319,20 @@ func (s *Server) handleListPRs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, prs)
+}
+
+func (s *Server) handleGetPR(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.GetPRFn == nil {
+		http.Error(w, "not configured", http.StatusNotImplemented)
+		return
+	}
+	pr, err := s.GetPRFn(id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	writeJSON(w, pr)
 }
 
 func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {

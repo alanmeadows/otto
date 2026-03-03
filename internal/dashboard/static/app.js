@@ -6,6 +6,7 @@ const state = {
     sessions: [],
     persistedSessions: [],
     trackedPRs: [],
+    selectedPR: null,
     activeSession: null,
     reconnectDelay: 1000,
     reconnectTimer: null,
@@ -372,21 +373,88 @@ function renderPRs() {
     container.innerHTML = '';
     for (const pr of state.trackedPRs) {
         const el = document.createElement('div');
-        el.className = 'pr-item';
+        el.className = 'pr-item' + (state.selectedPR === pr.id ? ' active' : '');
+        el.dataset.prId = pr.id;
         const statusIcon = prStatusIcon(pr.status, pr.pipeline_state);
         const waitingOn = prWaitingOn(pr);
         el.innerHTML = `
-            <a href="${escapeHtml(pr.url)}" target="_blank" rel="noopener" class="pr-link" title="${escapeHtml(pr.title)}">
+            <div class="pr-item-header">
                 <span class="pr-status-icon">${statusIcon}</span>
                 <span class="pr-title">${escapeHtml(pr.title || 'PR #' + pr.id)}</span>
-            </a>
+            </div>
             <div class="pr-meta">
                 <span class="pr-id">#${escapeHtml(pr.id)}</span>
                 <span class="pr-repo">${escapeHtml(pr.repo || '')}</span>
                 ${waitingOn ? `<span class="pr-waiting">${escapeHtml(waitingOn)}</span>` : ''}
             </div>`;
+        el.addEventListener('click', () => selectPR(pr.id));
         container.appendChild(el);
     }
+}
+
+function selectPR(id) {
+    state.selectedPR = id;
+    state.activeSession = null;
+    renderSessionList();
+    renderPRs();
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('chat-view').classList.add('hidden');
+    document.getElementById('pr-detail-view').classList.remove('hidden');
+    document.getElementById('pr-detail-body').innerHTML = '<div style="color:var(--text-muted);padding:20px">Loading…</div>';
+
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/prs/' + encodeURIComponent(id) + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url)
+        .then(r => { if (!r.ok) throw new Error('Not found'); return r.json(); })
+        .then(pr => renderPRDetail(pr))
+        .catch(err => {
+            document.getElementById('pr-detail-body').innerHTML =
+                '<div style="color:var(--red);padding:20px">Failed to load PR: ' + escapeHtml(err.message) + '</div>';
+        });
+
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+    }
+}
+
+function renderPRDetail(pr) {
+    const icon = prStatusIcon(pr.status, pr.pipeline_state);
+    document.getElementById('pr-detail-icon').textContent = icon;
+    document.getElementById('pr-detail-title').textContent = pr.title || 'PR #' + pr.id;
+    document.getElementById('pr-detail-link').href = pr.url || '#';
+
+    const waitingOn = prWaitingOn(pr);
+    const meta = [
+        `<span class="pr-detail-tag">${escapeHtml(pr.provider)}</span>`,
+        `<span class="pr-detail-tag">${escapeHtml(pr.repo)}</span>`,
+        `<span class="pr-detail-tag">${escapeHtml(pr.status)}</span>`,
+        pr.pipeline_state ? `<span class="pr-detail-tag">pipeline: ${escapeHtml(pr.pipeline_state)}</span>` : '',
+        waitingOn ? `<span class="pr-detail-tag pr-waiting">waiting: ${escapeHtml(waitingOn)}</span>` : '',
+        pr.fix_attempts > 0 ? `<span class="pr-detail-tag">fixes: ${pr.fix_attempts}/${pr.max_fix_attempts}</span>` : '',
+        pr.last_checked ? `<span class="pr-detail-tag">checked: ${new Date(pr.last_checked).toLocaleTimeString()}</span>` : '',
+    ].filter(Boolean).join(' ');
+    document.getElementById('pr-detail-meta').innerHTML = meta;
+
+    // Render body as simple formatted HTML.
+    const body = pr.body || '*No activity recorded yet.*';
+    document.getElementById('pr-detail-body').innerHTML = renderMarkdownSimple(body);
+}
+
+function renderMarkdownSimple(md) {
+    // Lightweight markdown → HTML (headings, bold, italic, code, links, lists).
+    return md
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+        .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+        .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+        .replace(/\*(.+?)\*/g, '<em>$1</em>')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/^- (.+)$/gm, '<li>$1</li>')
+        .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
+        .replace(/<\/ul>\s*<ul>/g, '')
+        .replace(/\n\n/g, '<br><br>')
+        .replace(/\n/g, '<br>');
 }
 
 function prStatusIcon(status, pipelineState) {
@@ -654,10 +722,13 @@ function isRecentlyActive(isoStr) {
 
 function selectSession(name) {
     state.activeSession = name;
+    state.selectedPR = null;
     state.renderedMessageCount = 0;
     renderSessionList();
+    renderPRs();
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('chat-view').classList.remove('hidden');
+    document.getElementById('pr-detail-view').classList.add('hidden');
     document.getElementById('chat-messages').innerHTML = '';
     updateChatHeader();
     showActivity(false);

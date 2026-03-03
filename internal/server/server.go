@@ -72,6 +72,7 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 			defer wg.Done()
 			dashSrv := dashboard.NewServer(cfg)
 			dashSrv.ListPRsFn = func() (any, error) { return ListPRs() }
+			dashSrv.GetPRFn = func(id string) (any, error) { return FindPRDetail(id) }
 			if err := dashSrv.Start(ctx, dashPort); err != nil {
 				slog.Error("dashboard server error", "error", err)
 			}

@@ -113,6 +113,16 @@ function handleSessionsList(payload) {
     if (state.activeSession) {
         updateChatHeader();
     }
+    // Auto-select a session that was just resumed.
+    if (state._pendingResume) {
+        const found = state.sessions.find(s => s.name === state._pendingResume);
+        if (found) {
+            const name = state._pendingResume;
+            state._pendingResume = null;
+            selectSession(name);
+            send('get_persisted_sessions', {});
+        }
+    }
 }
 
 function handleSessionHistory(payload) {
@@ -309,12 +319,8 @@ function resumePersistedSession(sessionId) {
     const displayName = session?.summary || sessionId.substring(0, 8);
     // Truncate long names for the sidebar
     const name = displayName.length > 40 ? displayName.substring(0, 37) + '...' : displayName;
+    state._pendingResume = name;
     send('resume_session', { session_id: sessionId, display_name: name });
-    // Wait for sessions_list update then select
-    setTimeout(() => {
-        selectSession(name);
-        send('get_persisted_sessions', {});
-    }, 2000);
 }
 
 function handleTunnelStatus(payload) {

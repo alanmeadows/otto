@@ -488,6 +488,55 @@ function prWaitingOn(pr) {
     return parts.length > 0 ? parts.join(', ') : '';
 }
 
+// --- Session Search ---
+
+let _searchDebounce = null;
+function onSearchInput(e) {
+    const q = e.target.value.trim();
+    clearTimeout(_searchDebounce);
+    const container = document.getElementById('search-results');
+    if (!q) {
+        container.classList.add('hidden');
+        container.innerHTML = '';
+        return;
+    }
+    _searchDebounce = setTimeout(() => searchSessions(q), 300);
+}
+
+function searchSessions(query) {
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/sessions/search?q=' + encodeURIComponent(query) + (keyParam ? '&key=' + encodeURIComponent(keyParam) : '');
+    fetch(url)
+        .then(r => r.json())
+        .then(results => renderSearchResults(results))
+        .catch(() => renderSearchResults([]));
+}
+
+function renderSearchResults(results) {
+    const container = document.getElementById('search-results');
+    if (!results || results.length === 0) {
+        container.innerHTML = '<div class="empty-hint" style="padding:6px 0;color:var(--text-muted);font-size:12px">No results</div>';
+        container.classList.remove('hidden');
+        return;
+    }
+    container.innerHTML = '';
+    container.classList.remove('hidden');
+    for (const r of results) {
+        const el = document.createElement('div');
+        el.className = 'search-result-item';
+        el.innerHTML = `
+            <div class="search-result-title">${escapeHtml(r.summary || r.session_id.substring(0, 8))}</div>
+            <div class="search-result-snippet">${escapeHtml(r.snippet).replace(/»/g, '<mark>').replace(/«/g, '</mark>')}</div>
+            <div class="search-result-meta">${r.hits} hit${r.hits !== 1 ? 's' : ''}${r.updated_at ? ' · ' + new Date(r.updated_at).toLocaleDateString() : ''}</div>`;
+        el.addEventListener('click', () => {
+            document.getElementById('session-search').value = '';
+            container.classList.add('hidden');
+            resumePersistedSession(r.session_id);
+        });
+        container.appendChild(el);
+    }
+}
+
 // --- Chat rendering ---
 
 function appendChatMessage(role, content, streaming) {
@@ -844,6 +893,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Re-render relative timestamps every 10s.
     setInterval(() => { renderPersistedSessionList(); }, 10000);
+
+    // Session search
+    document.getElementById('session-search').addEventListener('input', onSearchInput);
 
     // Sidebar toggle
     document.getElementById('sidebar-toggle').addEventListener('click', () => {

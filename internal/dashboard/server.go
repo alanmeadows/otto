@@ -237,6 +237,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	// Dashboard routes — protected by tunnel identity check.
 	mux.Handle("GET /", s.requireDashboardAccess(http.FileServer(http.FS(staticFS))))
 	mux.HandleFunc("GET /api/sessions", s.guardDashboard(s.handleListSessions))
+	mux.HandleFunc("GET /api/sessions/search", s.guardDashboard(s.handleSearchSessions))
 	mux.HandleFunc("POST /api/sessions", s.guardDashboard(s.handleCreateSession))
 	mux.HandleFunc("DELETE /api/sessions/{name}", s.guardDashboard(s.handleDeleteSession))
 	mux.HandleFunc("GET /api/worktrees", s.guardDashboard(s.handleListWorktrees))
@@ -265,6 +266,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleListSessions(w http.ResponseWriter, r *http.Request) {
 	sessions := s.manager.ListSessions()
 	writeJSON(w, sessions)
+}
+
+func (s *Server) handleSearchSessions(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	if q == "" {
+		writeJSON(w, []any{})
+		return
+	}
+	results := s.manager.SearchSessions(q)
+	if results == nil {
+		results = []copilot.SessionSearchResult{}
+	}
+	writeJSON(w, results)
 }
 
 func (s *Server) handleCreateSession(w http.ResponseWriter, r *http.Request) {

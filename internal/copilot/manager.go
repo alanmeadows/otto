@@ -425,3 +425,84 @@ func readWorkspaceYAML(sessionDir string) *workspaceMeta {
 	}
 	return &workspaceMeta{summary: summary, createdAt: raw.CreatedAt, updatedAt: raw.UpdatedAt}
 }
+
+// SessionSearchResult represents a single search hit across session history.
+type SessionSearchResult struct {
+	SessionID string `json:"session_id"`
+	Summary   string `json:"summary"`
+	Snippet   string `json:"snippet"`
+	Hits      int    `json:"hits"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// SearchSessions performs FTS5 search across session history in session-store.db.
+func (m *Manager) SearchSessions(query string) []SessionSearchResult {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	dbPath := filepath.Join(home, ".copilot", "session-store.db")
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	// Get hit counts per session.
+	rows, err := db.Query(`
+		SELECT si.session_id, COUNT(*) AS hits,
+		       COALESCE(s.summary, ''), COALESCE(s.updated_at, '')
+		FROM search_index si
+		LEFT JOIN sessions s ON s.id = si.session_id
+		WHERE search_index MATCH ?
+		GROUP BY si.session_id
+		ORDER BY hits DESC
+		LIMIT 20
+	`, query)
+	if err != nil {
+		slog.Debug("session search query failed", "error", err)
+		return nil
+	}
+	defer rows.Close()
+
+	type hitRow struct {
+		sessionID string
+		hits      int
+		summary   string
+		updatedAt string
+	}
+	var hits []hitRow
+	for rows.Next() {
+		var h hitRow
+		if err := rows.Scan(&h.sessionID, &h.hits, &h.summary, &h.updatedAt); err != nil {
+			continue
+		}
+		hits = append(hits, h)
+	}
+
+	// Fetch one snippet per session (snippet() only works on direct FTS5 match).
+	var results []SessionSearchResult
+	for _, h := range hits {
+		snippet := ""
+		row := db.QueryRow(`
+			SELECT snippet(search_index, 0, '»', '«', '…', 20)
+			FROM search_index
+			WHERE search_index MATCH ? AND session_id = ?
+			LIMIT 1
+		`, query, h.sessionID)
+		row.Scan(&snippet)
+
+		summary := strings.TrimLeft(h.summary, "# ")
+		if idx := strings.IndexByte(summary, '\n'); idx >= 0 {
+			summary = summary[:idx]
+		}
+		results = append(results, SessionSearchResult{
+			SessionID: h.sessionID,
+			Summary:   summary,
+			Snippet:   snippet,
+			Hits:      h.hits,
+			UpdatedAt: h.updatedAt,
+		})
+	}
+	return results
+}

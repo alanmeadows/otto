@@ -99,7 +99,6 @@ function handleMessage(msg) {
         case 'worktrees_list': handleWorktreesList(msg.payload); break;
         case 'persisted_sessions_list': handlePersistedSessionsList(msg.payload); break;
         case 'reasoning_delta': handleReasoningDelta(msg.payload); break;
-        case 'allowed_users_list': handleAllowedUsersList(msg.payload); break;
         case 'user_message': handleUserMessage(msg.payload); break;
     }
 }
@@ -327,17 +326,14 @@ function handleTunnelStatus(payload) {
 function renderTunnelStatus() {
     const activeEl = document.getElementById('tunnel-active');
     const inactiveEl = document.getElementById('tunnel-inactive');
-    const urlInput = document.getElementById('tunnel-url-input');
     const badge = document.getElementById('tunnel-status');
 
     if (state.tunnelRunning && state.tunnelURL) {
         activeEl.classList.remove('hidden');
         inactiveEl.classList.add('hidden');
-        // Show the keyed URL so user can copy-paste and auto-authenticate.
-        urlInput.value = state.tunnelKeyedURL || state.tunnelURL;
         badge.classList.remove('hidden');
         badge.textContent = '🔗 Tunnel';
-        badge.title = state.tunnelURL;
+        badge.title = 'Click to copy tunnel URL';
     } else {
         activeEl.classList.add('hidden');
         inactiveEl.classList.remove('hidden');
@@ -708,34 +704,6 @@ function sendMessage() {
     document.getElementById('send-btn').disabled = true;
 }
 
-function handleAllowedUsersList(payload) {
-    const container = document.getElementById('allowed-users-list');
-    container.innerHTML = '';
-    if (payload.owner_email) {
-        const ownerEl = document.createElement('div');
-        ownerEl.className = 'allowed-user-item';
-        ownerEl.innerHTML = '<span>' + esc(payload.owner_email) + ' <em style="color:var(--text-muted)">(owner)</em></span>';
-        container.appendChild(ownerEl);
-    }
-    (payload.users || []).forEach(function(email) {
-        const el = document.createElement('div');
-        el.className = 'allowed-user-item';
-        el.innerHTML = '<span>' + esc(email) + '</span><span class="remove-user" title="Remove">✕</span>';
-        el.querySelector('.remove-user').onclick = function() {
-            send('remove_allowed_user', { email: email });
-        };
-        container.appendChild(el);
-    });
-}
-
-function addAllowedUser() {
-    const input = document.getElementById('add-user-email');
-    const email = input.value.trim();
-    if (!email) return;
-    send('add_allowed_user', { email: email });
-    input.value = '';
-}
-
 function shareSession() {
     if (!state.activeSession) return;
 
@@ -831,16 +799,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Share button
     document.getElementById('share-btn').addEventListener('click', shareSession);
 
-    // Tunnel URL copy
-    document.getElementById('copy-tunnel-url').addEventListener('click', () => {
-        const url = document.getElementById('tunnel-url-input').value;
-        navigator.clipboard.writeText(url).catch(() => {});
-    });
-
-    // Allowed users
-    document.getElementById('add-user-btn').addEventListener('click', addAllowedUser);
-    document.getElementById('add-user-email').addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') { e.preventDefault(); addAllowedUser(); }
+    // Tunnel badge — click to copy URL
+    document.getElementById('tunnel-status').addEventListener('click', () => {
+        const url = state.tunnelKeyedURL || state.tunnelURL;
+        if (url) {
+            navigator.clipboard.writeText(url).then(() => {
+                const badge = document.getElementById('tunnel-status');
+                badge.textContent = '✅ Copied!';
+                setTimeout(() => { badge.textContent = '🔗 Tunnel'; }, 1500);
+            }).catch(() => {});
+        }
     });
 
     // Escape to close modal

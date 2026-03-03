@@ -54,26 +54,13 @@
                                 <span class="tunnel-label">Status:</span>
                                 <span style="color:var(--green)">Active</span>
                             </div>
-                            <div id="tunnel-url-display">
-                                <input id="tunnel-url-input" type="text" readonly>
-                                <button id="copy-tunnel-url" class="small-btn">Copy</button>
-                            </div>
-                            <details class="tunnel-settings">
-                                <summary>Allowed Users</summary>
-                                <div class="allowed-users-hint">Only these users can access the full dashboard. Share links bypass this.</div>
-                                <div id="allowed-users-list"></div>
-                                <div class="allowed-users-add">
-                                    <input id="add-user-email" type="email" placeholder="user@microsoft.com">
-                                    <button id="add-user-btn" class="small-btn">Add</button>
-                                </div>
-                            </details>
                         </div>
                         <div id="tunnel-inactive">
                             <div class="tunnel-info">
                                 <span class="tunnel-label">Status:</span>
                                 <span style="color:var(--text-muted)">Not active</span>
                             </div>
-                            <div class="tunnel-hint">Enable via CLI: <code>otto server start --dashboard --tunnel</code><br>
+                            <div class="tunnel-hint">Configure <code>tunnel_id</code> in otto.jsonc<br>
                             <a href="https://github.com/alanmeadows/otto/blob/main/docs/tunnel.md" target="_blank" rel="noopener">Setup guide →</a></div>
                         </div>
                     </div>

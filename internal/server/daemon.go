@@ -52,18 +52,45 @@ func LogFilePath() string {
 func StartDaemon(port int, logDir string, foreground bool) error {
 	// Use file lock to prevent concurrent starts.
 	lockPath := PIDFilePath() + ".lock"
-	return store.WithLock(lockPath, 5*time.Second, func() error {
-		// Check if already running.
+
+	if foreground {
+		return store.WithLock(lockPath, 5*time.Second, func() error {
+			if running, pid, _, _ := DaemonStatus(); running {
+				return fmt.Errorf("daemon already running (PID %d)", pid)
+			}
+			return runForeground(port, logDir)
+		})
+	}
+
+	// For daemon mode, hold the lock only for the fork, then release
+	// before printing URLs / polling for tunnel (which blocks).
+	var result *forkResult
+	err := store.WithLock(lockPath, 5*time.Second, func() error {
 		if running, pid, _, _ := DaemonStatus(); running {
 			return fmt.Errorf("daemon already running (PID %d)", pid)
 		}
-
-		if foreground {
-			return runForeground(port, logDir)
-		}
-
-		return forkDaemon(port, logDir)
+		var forkErr error
+		result, forkErr = forkDaemon(port, logDir)
+		return forkErr
 	})
+	if err != nil {
+		return err
+	}
+
+	// Print URLs and poll for tunnel — lock is released so child can start.
+	result.printStatus()
+	return nil
+}
+
+// forkResult holds the information needed to print startup status
+// after the file lock is released.
+type forkResult struct {
+	pid              int
+	logFile          string
+	port             int
+	dashPort         int
+	dashboardEnabled bool
+	tunnelEnabled    bool
 }
 
 // expandHome replaces a leading "~/" in a path with the user's home directory.
@@ -83,7 +110,7 @@ func expandHome(path string) string {
 	return filepath.Join(home, path[2:])
 }
 
-func forkDaemon(port int, logDir string) error {
+func forkDaemon(port int, logDir string) (*forkResult, error) {
 	// Expand ~ in log directory path.
 	logDir = expandHome(logDir)
 
@@ -97,7 +124,7 @@ func forkDaemon(port int, logDir string) error {
 		logDir = filepath.Join(dataDir, "otto", "logs")
 	}
 	if err := os.MkdirAll(logDir, 0755); err != nil {
-		return fmt.Errorf("creating log directory: %w", err)
+		return nil, fmt.Errorf("creating log directory: %w", err)
 	}
 
 	logFile := filepath.Join(logDir, "ottod.log")
@@ -135,7 +162,7 @@ func forkDaemon(port int, logDir string) error {
 	// Redirect output to log file.
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		return fmt.Errorf("opening log file: %w", err)
+		return nil, fmt.Errorf("opening log file: %w", err)
 	}
 	cmd.Stdout = f
 	cmd.Stderr = f
@@ -143,7 +170,7 @@ func forkDaemon(port int, logDir string) error {
 
 	if err := cmd.Start(); err != nil {
 		f.Close()
-		return fmt.Errorf("starting daemon: %w", err)
+		return nil, fmt.Errorf("starting daemon: %w", err)
 	}
 
 	pid := cmd.Process.Pid
@@ -153,23 +180,32 @@ func forkDaemon(port int, logDir string) error {
 	cmd.Process.Release()
 	f.Close()
 
-	fmt.Printf("daemon started (PID: %d)\n", pid)
-	fmt.Printf("log file: %s\n", logFile)
-	fmt.Printf("server: http://localhost:%d\n", port)
-	if dashboardEnabled {
-		fmt.Printf("dashboard: http://localhost:%d\n", dashPort)
+	return &forkResult{
+		pid:              pid,
+		logFile:          logFile,
+		port:             port,
+		dashPort:         dashPort,
+		dashboardEnabled: dashboardEnabled,
+		tunnelEnabled:    tunnelEnabled,
+	}, nil
+}
+
+func (r *forkResult) printStatus() {
+	fmt.Printf("daemon started (PID: %d)\n", r.pid)
+	fmt.Printf("log file: %s\n", r.logFile)
+	fmt.Printf("server: http://localhost:%d\n", r.port)
+	if r.dashboardEnabled {
+		fmt.Printf("dashboard: http://localhost:%d\n", r.dashPort)
 	}
 
 	// If tunnel is enabled, poll the dashboard API for the tunnel URL.
-	if dashboardEnabled && tunnelEnabled {
-		if tunnelURL := pollTunnelURL(dashPort); tunnelURL != "" {
+	if r.dashboardEnabled && r.tunnelEnabled {
+		if tunnelURL := pollTunnelURL(r.dashPort); tunnelURL != "" {
 			fmt.Printf("tunnel: %s\n", tunnelURL)
 		} else {
 			fmt.Printf("tunnel: starting (check 'otto server logs' if it doesn't come up)\n")
 		}
 	}
-
-	return nil
 }
 
 // pollTunnelURL polls the dashboard's tunnel status API until the tunnel URL

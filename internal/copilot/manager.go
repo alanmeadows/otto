@@ -2,6 +2,7 @@ package copilot
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	sdk "github.com/github/copilot-sdk/go"
+	_ "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
 )
 
@@ -293,6 +295,7 @@ func (m *Manager) GetHistory(name string) ([]ChatMessage, error) {
 }
 
 // ListPersistedSessions scans ~/.copilot/session-state/ for saved session directories.
+// Uses session-store.db for metadata when available, falling back to workspace.yaml.
 func (m *Manager) ListPersistedSessions() []PersistedSession {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -303,6 +306,9 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 	if err != nil {
 		return nil
 	}
+
+	// Load metadata from session-store.db (single query vs N file reads).
+	dbMeta := loadSessionMetaFromDB(filepath.Join(home, ".copilot", "session-store.db"))
 
 	var result []PersistedSession
 	for _, e := range entries {
@@ -318,15 +324,24 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 			LastModified: info.ModTime(),
 			Path:         filepath.Join(stateDir, e.Name()),
 		}
-		// Parse workspace.yaml for summary and creation time.
-		if meta := readWorkspaceYAML(ps.Path); meta != nil {
+
+		if meta, ok := dbMeta[e.Name()]; ok {
+			// Fast path: metadata from DB.
 			ps.Summary = meta.summary
 			ps.CreatedAt = meta.createdAt
 			ps.UpdatedAt = meta.updatedAt
-			if t, err := time.Parse(time.RFC3339Nano, meta.updatedAt); err == nil {
-				ps.updatedTime = t
-				ps.LastModified = t
+		} else {
+			// Fallback: read workspace.yaml for sessions not in DB.
+			if meta := readWorkspaceYAML(ps.Path); meta != nil {
+				ps.Summary = meta.summary
+				ps.CreatedAt = meta.createdAt
+				ps.UpdatedAt = meta.updatedAt
 			}
+		}
+
+		if t, err := time.Parse(time.RFC3339Nano, ps.UpdatedAt); err == nil {
+			ps.updatedTime = t
+			ps.LastModified = t
 		}
 		result = append(result, ps)
 	}
@@ -341,6 +356,46 @@ type workspaceMeta struct {
 	summary   string
 	createdAt string
 	updatedAt string
+}
+
+// loadSessionMetaFromDB reads summary/timestamps for all sessions from
+// ~/.copilot/session-store.db in a single query. Returns empty map on error.
+func loadSessionMetaFromDB(dbPath string) map[string]*workspaceMeta {
+	result := make(map[string]*workspaceMeta)
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		return result
+	}
+	defer db.Close()
+
+	rows, err := db.Query("SELECT id, summary, created_at, updated_at FROM sessions")
+	if err != nil {
+		return result
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var id string
+		var summary, createdAt, updatedAt sql.NullString
+		if err := rows.Scan(&id, &summary, &createdAt, &updatedAt); err != nil {
+			continue
+		}
+		meta := &workspaceMeta{
+			summary:   summary.String,
+			createdAt: createdAt.String,
+			updatedAt: updatedAt.String,
+		}
+		// Clean up summary the same way as workspace.yaml.
+		if len(meta.summary) > 200 {
+			meta.summary = meta.summary[:197] + "..."
+		}
+		meta.summary = strings.TrimLeft(meta.summary, "# ")
+		if idx := strings.IndexByte(meta.summary, '\n'); idx >= 0 {
+			meta.summary = meta.summary[:idx]
+		}
+		result[id] = meta
+	}
+	return result
 }
 
 // readWorkspaceYAML reads summary and created_at from a session's workspace.yaml.

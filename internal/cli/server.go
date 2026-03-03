@@ -24,10 +24,10 @@ or installed as a systemd user service for persistent operation.`,
 
 var foregroundFlag bool
 var portFlag int
-var dashboardFlag bool
+var noDashboardFlag bool
 var dashboardOnlyFlag bool
 var dashboardPortFlag int
-var tunnelFlag bool
+var noTunnelFlag bool
 
 func init() {
 	serverCmd.AddCommand(serverStartCmd)
@@ -38,10 +38,10 @@ func init() {
 
 	serverStartCmd.Flags().BoolVar(&foregroundFlag, "foreground", false, "Run in foreground (don't daemonize)")
 	serverStartCmd.Flags().IntVar(&portFlag, "port", 0, "Server port (default from config or 4097)")
-	serverStartCmd.Flags().BoolVar(&dashboardFlag, "dashboard", false, "Enable the Copilot session dashboard")
+	serverStartCmd.Flags().BoolVar(&noDashboardFlag, "no-dashboard", false, "Disable the Copilot session dashboard")
 	serverStartCmd.Flags().BoolVar(&dashboardOnlyFlag, "dashboard-only", false, "Run only the dashboard (skip PR monitoring)")
 	serverStartCmd.Flags().IntVar(&dashboardPortFlag, "dashboard-port", 0, "Dashboard port (default from config or 4098)")
-	serverStartCmd.Flags().BoolVar(&tunnelFlag, "tunnel", false, "Auto-start Azure DevTunnel for dashboard")
+	serverStartCmd.Flags().BoolVar(&noTunnelFlag, "no-tunnel", false, "Disable Azure DevTunnel for dashboard")
 }
 
 var serverStartCmd = &cobra.Command{
@@ -53,15 +53,16 @@ By default the daemon forks into the background. Use --foreground
 to run in the current terminal (useful for debugging). The port
 defaults to the config value or 4097.
 
-Use --dashboard to enable the Copilot session dashboard, which
-serves a web UI for managing Copilot CLI sessions from your browser
-or phone. Use --tunnel to expose the dashboard via Azure DevTunnels.`,
+The dashboard is enabled by default when a copilot_server or
+tunnel_id is configured. Use --no-dashboard to disable it.
+The tunnel auto-starts when a tunnel_id is configured.
+Use --no-tunnel to disable it.`,
 	Example: `  otto server start
   otto server start --foreground
   otto server start --port 9090
-  otto server start --dashboard
-  otto server start --dashboard --tunnel
-  otto server start --dashboard-only --tunnel`,
+  otto server start --no-dashboard
+  otto server start --no-tunnel
+  otto server start --dashboard-only`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := portFlag
 		if port == 0 {
@@ -72,8 +73,25 @@ or phone. Use --tunnel to expose the dashboard via Azure DevTunnels.`,
 		}
 		logDir := appConfig.Server.LogDir
 
-		// Apply dashboard flags to config so they propagate.
-		if dashboardFlag || dashboardOnlyFlag {
+		// Dashboard is enabled by default if there's dashboard config;
+		// --no-dashboard explicitly disables it.
+		dashboardEnabled := appConfig.Dashboard.Enabled ||
+			appConfig.Dashboard.CopilotServer != "" ||
+			appConfig.Dashboard.TunnelID != "" ||
+			dashboardOnlyFlag
+		if noDashboardFlag {
+			dashboardEnabled = false
+		}
+
+		// Tunnel is enabled by default if tunnel_id is configured;
+		// --no-tunnel explicitly disables it.
+		tunnelEnabled := appConfig.Dashboard.AutoStartTunnel ||
+			appConfig.Dashboard.TunnelID != ""
+		if noTunnelFlag || !dashboardEnabled {
+			tunnelEnabled = false
+		}
+
+		if dashboardEnabled || dashboardOnlyFlag {
 			appConfig.Dashboard.Enabled = true
 			os.Setenv("OTTO_DASHBOARD", "1")
 		}
@@ -81,7 +99,7 @@ or phone. Use --tunnel to expose the dashboard via Azure DevTunnels.`,
 			appConfig.Dashboard.Port = dashboardPortFlag
 			os.Setenv("OTTO_DASHBOARD_PORT", fmt.Sprintf("%d", dashboardPortFlag))
 		}
-		if tunnelFlag {
+		if tunnelEnabled {
 			appConfig.Dashboard.AutoStartTunnel = true
 			os.Setenv("OTTO_TUNNEL", "1")
 		}

@@ -139,16 +139,11 @@ func forkDaemon(port int, logDir string) (*forkResult, error) {
 		}
 	}
 
-	// Fork: re-exec with --foreground, propagating port and dashboard flags.
+	// Fork: re-exec with --foreground, propagating port.
+	// Dashboard/tunnel state is propagated via OTTO_DASHBOARD/OTTO_TUNNEL env vars
+	// which are inherited by the child and read in runForeground.
 	forkArgs := []string{"server", "start", "--foreground", "--port", strconv.Itoa(port)}
 
-	// Check environment for dashboard flags (set by CLI layer).
-	if dashboardEnabled {
-		forkArgs = append(forkArgs, "--dashboard")
-	}
-	if tunnelEnabled {
-		forkArgs = append(forkArgs, "--tunnel")
-	}
 	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
 		forkArgs = append(forkArgs, "--dashboard-port", v)
 	}

@@ -788,8 +788,13 @@ func (b *Backend) parsePRIdentifier(id string) (prID, repo, org, project string)
 	host := strings.ToLower(u.Hostname())
 
 	// Pattern: https://{org}.visualstudio.com/{project}/_git/{repo}/pullrequest/{id}
+	// Also: https://{org}.visualstudio.com/DefaultCollection/{project}/_git/{repo}/pullrequest/{id}
 	if strings.HasSuffix(host, ".visualstudio.com") {
 		orgName := strings.TrimSuffix(host, ".visualstudio.com")
+		// Strip leading "DefaultCollection" segment if present.
+		if len(parts) > 0 && strings.EqualFold(parts[0], "DefaultCollection") {
+			parts = parts[1:]
+		}
 		if len(parts) >= 5 && parts[1] == "_git" && parts[3] == "pullrequest" {
 			return parts[4], parts[2], orgName, parts[0]
 		}

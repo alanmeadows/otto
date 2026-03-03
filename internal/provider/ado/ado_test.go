@@ -555,6 +555,24 @@ func TestParsePRIdentifier(t *testing.T) {
 		prID, _, _, _ := b.parsePRIdentifier("not-valid")
 		assert.Empty(t, prID)
 	})
+
+	t.Run("visualstudio.com with DefaultCollection", func(t *testing.T) {
+		prID, repo, org, project := b.parsePRIdentifier(
+			"https://msazure.visualstudio.com/DefaultCollection/One/_git/azlocal-overlay/pullrequest/14928465")
+		assert.Equal(t, "14928465", prID)
+		assert.Equal(t, "azlocal-overlay", repo)
+		assert.Equal(t, "msazure", org)
+		assert.Equal(t, "One", project)
+	})
+
+	t.Run("visualstudio.com without DefaultCollection", func(t *testing.T) {
+		prID, repo, org, project := b.parsePRIdentifier(
+			"https://msazure.visualstudio.com/One/_git/azlocal-overlay/pullrequest/14928465")
+		assert.Equal(t, "14928465", prID)
+		assert.Equal(t, "azlocal-overlay", repo)
+		assert.Equal(t, "msazure", org)
+		assert.Equal(t, "One", project)
+	})
 }
 
 func TestWorkflowSubmitUnsupported(t *testing.T) {

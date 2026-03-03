@@ -15,6 +15,7 @@ const state = {
     renderedMessageCount: 0,  // how many history messages we've rendered
     tunnelRunning: false,
     tunnelURL: '',
+    ownerNickname: 'owner',
 };
 
 // --- WebSocket ---
@@ -101,6 +102,7 @@ function handleMessage(msg) {
         case 'persisted_sessions_list': handlePersistedSessionsList(msg.payload); break;
         case 'reasoning_delta': handleReasoningDelta(msg.payload); break;
         case 'user_message': handleUserMessage(msg.payload); break;
+        case 'dashboard_config': handleDashboardConfig(msg.payload); break;
     }
 }
 
@@ -178,7 +180,7 @@ function handleToolStarted(payload) {
 
 function handleToolCompleted(payload) {
     if (payload.session_name !== state.activeSession) return;
-    const id = payload.call_id || payload.call_id;
+    const id = payload.call_id;
     updateToolIndicator(id, payload.success ? 'completed' : 'failed');
 }
 
@@ -249,6 +251,12 @@ function handleUserMessage(payload) {
 function handlePersistedSessionsList(payload) {
     state.persistedSessions = payload.sessions || [];
     renderPersistedSessionList();
+}
+
+function handleDashboardConfig(payload) {
+    if (payload.owner_nickname) {
+        state.ownerNickname = payload.owner_nickname;
+    }
 }
 
 // --- Rendering ---
@@ -547,7 +555,25 @@ function appendChatMessage(role, content, streaming) {
         div.id = 'streaming-message';
         div.classList.add('streaming-cursor');
     }
-    div.innerHTML = renderMarkdown(content);
+
+    var html = '';
+    if (role === 'assistant') {
+        html = '<div class="message-sender assistant">Copilot</div>';
+        html += renderMarkdown(content);
+    } else if (role === 'user' && content && content.indexOf(': ') > 0 && content.indexOf(': ') < 20) {
+        // Prefixed message from a shared user (e.g. "phil: tell me a joke")
+        var parts = content.split(': ');
+        var sender = parts.shift();
+        var body = parts.join(': ');
+        html = '<div class="message-sender guest">' + esc(sender) + '</div>';
+        html += renderMarkdown(body);
+    } else if (role === 'user') {
+        html = '<div class="message-sender owner">' + esc(state.ownerNickname) + '</div>';
+        html += renderMarkdown(content);
+    } else {
+        html = renderMarkdown(content);
+    }
+    div.innerHTML = html;
     container.appendChild(div);
     scrollToBottom();
 }
@@ -555,7 +581,10 @@ function appendChatMessage(role, content, streaming) {
 function updateStreamingMessage(content) {
     const el = document.getElementById('streaming-message');
     if (el) {
-        el.innerHTML = renderMarkdown(content);
+        // Preserve sender label, only update the content portion.
+        const senderEl = el.querySelector('.message-sender');
+        const senderHtml = senderEl ? senderEl.outerHTML : '';
+        el.innerHTML = senderHtml + renderMarkdown(content);
         scrollToBottom();
     }
 }
@@ -570,22 +599,56 @@ function finalizeStreamingMessage() {
 
 function appendToolIndicator(callId, toolName, status) {
     const container = document.getElementById('chat-messages');
+
+    // Find or create the current tool group at the bottom of the chat.
+    var group = container.lastElementChild;
+    if (!group || !group.classList.contains('tool-group')) {
+        group = document.createElement('div');
+        group.className = 'tool-group expanded';
+        group.innerHTML = '<div class="tool-group-header has-running" onclick="this.parentElement.classList.toggle(\'expanded\')">' +
+            '<span class="tool-group-icon">▶</span> <span class="tool-group-count">⚙️ 1 tool call</span></div>' +
+            '<div class="tool-group-body"></div>';
+        container.appendChild(group);
+    }
+
+    const body = group.querySelector('.tool-group-body');
     const div = document.createElement('div');
     div.className = `tool-indicator ${status}`;
     div.id = `tool-${callId}`;
     const icon = status === 'running' ? '⏳' : (status === 'completed' ? '✅' : '❌');
     div.innerHTML = `<span>${icon}</span> <span class="tool-name">${esc(toolName)}</span>`;
-    container.appendChild(div);
+    body.appendChild(div);
+
+    // Update the count in the group header.
+    const count = body.querySelectorAll('.tool-indicator').length;
+    group.querySelector('.tool-group-count').textContent = `⚙️ ${count} tool call${count !== 1 ? 's' : ''}`;
+
     scrollToBottom();
 }
 
 function updateToolIndicator(callId, status) {
     const el = document.getElementById(`tool-${callId}`);
-    if (el) {
-        el.className = `tool-indicator ${status}`;
-        const icon = status === 'completed' ? '✅' : '❌';
-        const name = el.querySelector('.tool-name')?.textContent || '';
-        el.innerHTML = `<span>${icon}</span> <span class="tool-name">${name}</span>`;
+    if (!el) return;
+    el.className = `tool-indicator ${status}`;
+    const icon = status === 'completed' ? '✅' : '❌';
+    const nameEl = el.querySelector('.tool-name');
+    const name = nameEl ? nameEl.textContent : '';
+    el.innerHTML = `<span>${icon}</span> <span class="tool-name">${esc(name)}</span>`;
+
+    // Update group header status and auto-collapse when all done.
+    const group = el.closest('.tool-group');
+    if (group) {
+        const body = group.querySelector('.tool-group-body');
+        const header = group.querySelector('.tool-group-header');
+        if (body && header) {
+            const running = body.querySelectorAll('.tool-indicator.running').length;
+            const failed = body.querySelectorAll('.tool-indicator.failed').length;
+            header.classList.toggle('has-running', running > 0);
+            header.classList.toggle('has-failed', failed > 0);
+            if (running === 0) {
+                group.classList.remove('expanded');
+            }
+        }
     }
 }
 

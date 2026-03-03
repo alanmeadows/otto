@@ -18,6 +18,7 @@ type Bridge struct {
 	clients       map[string]*wsClient
 	mu            sync.RWMutex
 	nextID        int
+	ownerNickname     string
 	onStartTunnel     func()
 	onStopTunnel      func()
 	onListWorktrees   func() []WorktreeSummary
@@ -38,10 +39,11 @@ type wsClient struct {
 
 // NewBridge creates a Bridge wired to the given copilot Manager.
 // Call this after the Manager is created; it registers the event handler.
-func NewBridge(mgr *copilot.Manager) *Bridge {
+func NewBridge(mgr *copilot.Manager, ownerNickname string) *Bridge {
 	b := &Bridge{
-		manager: mgr,
-		clients: make(map[string]*wsClient),
+		manager:       mgr,
+		clients:       make(map[string]*wsClient),
+		ownerNickname: ownerNickname,
 	}
 	mgr.SetEventHandler(b.onSessionEvent)
 	return b
@@ -68,6 +70,7 @@ func (b *Bridge) HandleWS(w http.ResponseWriter, r *http.Request) {
 	slog.Info("websocket client connected", "id", id, "remote", r.RemoteAddr)
 
 	// Send initial state.
+	b.sendDashboardConfig(client)
 	b.sendSessionsList(client)
 	b.sendPersistedSessions(client)
 	b.sendAllowedUsers(client)
@@ -396,6 +399,12 @@ func (b *Bridge) sendAllowedUsers(client *wsClient) {
 	if b.onGetAllowedUsers != nil {
 		b.sendTo(client, MsgAllowedUsersList, b.onGetAllowedUsers())
 	}
+}
+
+func (b *Bridge) sendDashboardConfig(client *wsClient) {
+	b.sendTo(client, MsgDashboardConfig, DashboardConfigPayload{
+		OwnerNickname: b.ownerNickname,
+	})
 }
 
 func (b *Bridge) sendTunnelStatus(client *wsClient) {

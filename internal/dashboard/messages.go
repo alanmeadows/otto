@@ -47,6 +47,7 @@ const (
 	MsgReasoningDelta       = "reasoning_delta"
 	MsgPersistedSessionsList = "persisted_sessions_list"
 	MsgUserMessage          = "user_message"
+	MsgDashboardConfig      = "dashboard_config"
 )
 
 // Client → Server message types.
@@ -213,4 +214,8 @@ type AllowedUserPayload struct {
 type AllowedUsersListPayload struct {
 	OwnerEmail string   `json:"owner_email"`
 	Users      []string `json:"users"`
+}
+
+type DashboardConfigPayload struct {
+	OwnerNickname string `json:"owner_nickname"`
 }

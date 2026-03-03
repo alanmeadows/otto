@@ -349,7 +349,32 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 	sort.Slice(result, func(i, j int) bool {
 		return result[i].updatedTime.After(result[j].updatedTime)
 	})
-	return result
+
+	// Filter out otto-automated sessions (CI fix, PR comment response) which
+	// clutter the saved sessions list meant for human-initiated sessions.
+	filtered := result[:0]
+	for _, ps := range result {
+		if isAutomatedSession(ps.Summary) {
+			continue
+		}
+		filtered = append(filtered, ps)
+	}
+	return filtered
+}
+
+// isAutomatedSession returns true if the summary matches known otto automation patterns.
+func isAutomatedSession(summary string) bool {
+	prefixes := []string{
+		"You are analyzing CI/CD",
+		"You are fixing CI/CD",
+		"# PR Comment Response Prompt",
+	}
+	for _, p := range prefixes {
+		if strings.HasPrefix(summary, p) {
+			return true
+		}
+	}
+	return false
 }
 
 type workspaceMeta struct {

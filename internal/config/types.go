@@ -90,6 +90,7 @@ type DashboardConfig struct {
 	TunnelAllowOrg    string   `json:"tunnel_allow_org"`      // GitHub org to grant access (e.g. "my-org")
 	TunnelAllowEmails []string `json:"tunnel_allow_emails"`   // specific email addresses to grant access
 	OwnerEmail        string   `json:"owner_email"`           // dashboard owner email (auto-detected from tunnel JWT if empty)
+	OwnerNickname     string   `json:"owner_nickname"`        // display name for session owner in chat bubbles (default: "owner")
 	AllowedUsers      []string `json:"allowed_users"`         // emails allowed full dashboard access (e.g. ["alice@microsoft.com"])
 }
 
@@ -117,8 +118,9 @@ func DefaultConfig() Config {
 			LogDir:       "~/.local/share/otto/logs",
 		},
 		Dashboard: DashboardConfig{
-			Port:    4098,
-			Enabled: false,
+			Port:          4098,
+			Enabled:       false,
+			OwnerNickname: "owner",
 		},
 	}
 }

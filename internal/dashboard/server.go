@@ -53,7 +53,11 @@ func NewServer(cfg *config.Config) *Server {
 	} else {
 		mgr = copilot.NewManager()
 	}
-	bridge := NewBridge(mgr)
+	ownerNick := cfg.Dashboard.OwnerNickname
+	if ownerNick == "" {
+		ownerNick = "owner"
+	}
+	bridge := NewBridge(mgr, ownerNick)
 	tmgr := tunnel.NewManagerWithConfig(tunnel.Config{
 		TunnelID:    cfg.Dashboard.TunnelID,
 		Access:      cfg.Dashboard.TunnelAccess,
@@ -687,12 +691,18 @@ func (s *Server) handleSharedSession(w http.ResponseWriter, r *http.Request) {
 		modeLabel = "✏️ Read-write"
 	}
 
+	ownerNick := s.cfg.Dashboard.OwnerNickname
+	if ownerNick == "" {
+		ownerNick = "owner"
+	}
+
 	configJSON, _ := json.Marshal(map[string]string{
-		"token":      token,
-		"session":    st.SessionName,
-		"mode":       st.Mode,
-		"mode_label": modeLabel,
-		"expires":    remaining.String(),
+		"token":          token,
+		"session":        st.SessionName,
+		"mode":           st.Mode,
+		"mode_label":     modeLabel,
+		"expires":        remaining.String(),
+		"owner_nickname": ownerNick,
 	})
 
 	tmpl, err := staticFiles.ReadFile("static/shared.html")

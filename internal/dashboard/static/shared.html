@@ -51,6 +51,21 @@
   .message-sender { font-size: 11px; font-weight: 600; margin-bottom: 3px; }
   .message-sender.owner { color: var(--accent); }
   .message-sender.guest { color: var(--orange); }
+  .message-sender.assistant { color: var(--purple); }
+  .tool-group { align-self: flex-start; max-width: 85%; margin: 4px 0; }
+  .tool-group-header {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    background: var(--bg-tertiary); border-radius: 4px; font-size: 12px;
+    color: var(--text-secondary); cursor: pointer; user-select: none;
+    border-left: 3px solid var(--green);
+  }
+  .tool-group-header:hover { background: var(--bg-hover); }
+  .tool-group-header .tool-group-icon { transition: transform 0.15s; }
+  .tool-group.expanded .tool-group-icon { transform: rotate(90deg); }
+  .tool-group-header.has-running { border-left-color: var(--yellow); }
+  .tool-group-header.has-failed { border-left-color: var(--red); }
+  .tool-group-body { display: none; padding: 2px 0 2px 12px; }
+  .tool-group.expanded .tool-group-body { display: block; }
 </style>
 </head>
 <body>
@@ -165,6 +180,16 @@ function handleMsg(msg) {
       ws.send(JSON.stringify({type:'get_history',payload:{session_name:SHARE_CONFIG.session}}));
       break;
     case 'tool_started':
+      var group = container.lastElementChild;
+      if (!group || !group.classList.contains('tool-group')) {
+        group = document.createElement('div');
+        group.className = 'tool-group expanded';
+        group.innerHTML = '<div class="tool-group-header has-running" onclick="this.parentElement.classList.toggle(\'expanded\')">' +
+          '<span class="tool-group-icon">▶</span> <span class="tool-group-count">⚙️ 1 tool call</span></div>' +
+          '<div class="tool-group-body"></div>';
+        container.appendChild(group);
+      }
+      var tbody = group.querySelector('.tool-group-body');
       var tool = document.createElement('div');
       tool.className = 'tool-indicator running';
       tool.id = 'tool-' + msg.payload.call_id;
@@ -172,7 +197,9 @@ function handleMsg(msg) {
       try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.path||a.command||a.pattern||''; } catch(e){}
       if (detail.length > 50) detail = detail.substring(0,47)+'...';
       tool.innerHTML = '⏳ <span class="tool-name">' + esc(msg.payload.tool_name) + (detail ? ': '+esc(detail) : '') + '</span>';
-      container.appendChild(tool);
+      tbody.appendChild(tool);
+      var tcount = tbody.querySelectorAll('.tool-indicator').length;
+      group.querySelector('.tool-group-count').textContent = '⚙️ ' + tcount + ' tool call' + (tcount !== 1 ? 's' : '');
       container.scrollTop = container.scrollHeight;
       break;
     case 'tool_completed':
@@ -180,7 +207,19 @@ function handleMsg(msg) {
       if (te) {
         te.className = 'tool-indicator ' + (msg.payload.success?'completed':'failed');
         var icon = msg.payload.success ? '✅' : '❌';
-        te.innerHTML = icon + ' ' + te.querySelector('.tool-name').outerHTML;
+        var nameEl = te.querySelector('.tool-name');
+        te.innerHTML = icon + ' ' + (nameEl ? nameEl.outerHTML : '');
+      }
+      var tg = te ? te.closest('.tool-group') : null;
+      if (tg) {
+        var theader = tg.querySelector('.tool-group-header');
+        if (theader) {
+          var running = tg.querySelectorAll('.tool-indicator.running').length;
+          var failed = tg.querySelectorAll('.tool-indicator.failed').length;
+          if (running > 0) { theader.classList.add('has-running'); } else { theader.classList.remove('has-running'); }
+          if (failed > 0) { theader.classList.add('has-failed'); } else { theader.classList.remove('has-failed'); }
+          if (running === 0) tg.classList.remove('expanded');
+        }
       }
       break;
   }
@@ -193,13 +232,21 @@ function appendMsg(role, content, streaming) {
   if (streaming) div.id = 'streaming';
 
   var html = '';
-  // Parse sender prefix for user messages (e.g. "alan: tell me a joke")
-  if (role === 'user' && content.indexOf(': ') > 0 && content.indexOf(': ') < 20) {
+  if (role === 'assistant') {
+    html = '<div class="message-sender assistant">Copilot</div>';
+    html += '<div class="msg-body">' + renderMd(content) + '</div>';
+  } else if (role === 'user' && content.indexOf(': ') > 0 && content.indexOf(': ') < 20) {
+    // Prefixed message from a shared user (e.g. "phil: tell me a joke")
     var parts = content.split(': ');
     var sender = parts.shift();
     var body = parts.join(': ');
     html = '<div class="message-sender guest">' + esc(sender) + '</div>';
     html += '<div class="msg-body">' + renderMd(body) + '</div>';
+  } else if (role === 'user') {
+    // No prefix — this is the session owner
+    var ownerName = SHARE_CONFIG.owner_nickname || 'owner';
+    html = '<div class="message-sender owner">' + esc(ownerName) + '</div>';
+    html += '<div class="msg-body">' + renderMd(content) + '</div>';
   } else {
     html = '<div class="msg-body">' + renderMd(content) + '</div>';
   }

@@ -340,7 +340,9 @@ body {
     margin-bottom: 4px;
     color: var(--accent);
 }
-.message-sender.other { color: var(--orange); }
+.message-sender.owner { color: var(--accent); }
+.message-sender.guest { color: var(--orange); }
+.message-sender.assistant { color: var(--purple); }
 
 /* Markdown inside messages */
 .message p { margin: 0 0 8px 0; }
@@ -417,7 +419,7 @@ body {
     border-left: 3px solid var(--accent);
     font-size: 12px;
     color: var(--text-secondary);
-    margin: 4px 0;
+    margin: 2px 0;
     align-self: flex-start;
     max-width: 85%;
 }
@@ -425,6 +427,36 @@ body {
 .tool-indicator.completed { border-left-color: var(--green); }
 .tool-indicator.failed { border-left-color: var(--red); }
 .tool-indicator .tool-name { color: var(--accent); font-weight: 500; }
+
+/* Tool call group (collapsible container for consecutive tool calls) */
+.tool-group {
+    align-self: flex-start;
+    max-width: 85%;
+    margin: 4px 0;
+}
+.tool-group-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    border-left: 3px solid var(--green);
+}
+.tool-group-header:hover { background: var(--bg-hover); }
+.tool-group-header .tool-group-icon { transition: transform 0.15s; }
+.tool-group.expanded .tool-group-icon { transform: rotate(90deg); }
+.tool-group-header.has-running { border-left-color: var(--yellow); }
+.tool-group-header.has-failed { border-left-color: var(--red); }
+.tool-group-body {
+    display: none;
+    padding: 2px 0 2px 12px;
+}
+.tool-group.expanded .tool-group-body { display: block; }
 
 /* Streaming cursor */
 .streaming-cursor::after {

@@ -168,7 +168,7 @@ function handleToolStarted(payload) {
     if (payload.tool_input) {
         try {
             var args = JSON.parse(payload.tool_input);
-            detail = args.path || args.command || args.pattern || args.description || args.file_text?.substring(0,30) || '';
+            detail = args.intent || args.path || args.command || args.pattern || args.description || args.query || args.file_text?.substring(0,30) || '';
             if (detail.length > 60) detail = detail.substring(0, 57) + '...';
         } catch(e) {}
     }

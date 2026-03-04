@@ -194,7 +194,7 @@ function handleMsg(msg) {
       tool.className = 'tool-indicator running';
       tool.id = 'tool-' + msg.payload.call_id;
       var detail = '';
-      try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.path||a.command||a.pattern||''; } catch(e){}
+      try { var a = JSON.parse(msg.payload.tool_input || '{}'); detail = a.intent||a.path||a.command||a.pattern||a.description||a.query||''; } catch(e){}
       if (detail.length > 50) detail = detail.substring(0,47)+'...';
       tool.innerHTML = '⏳ <span class="tool-name">' + esc(msg.payload.tool_name) + (detail ? ': '+esc(detail) : '') + '</span>';
       tbody.appendChild(tool);

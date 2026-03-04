@@ -220,7 +220,10 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		defer cancel()
 		s.srv.Shutdown(shutdownCtx)
 		s.manager.Stop()
-		s.tunnelMgr.Stop()
+		// Don't stop bgtask-managed tunnels — they survive Otto restarts.
+		if !s.tunnelMgr.IsBgtaskManaged() {
+			s.tunnelMgr.Stop()
+		}
 	}()
 
 	slog.Info("starting dashboard server", "addr", addr)

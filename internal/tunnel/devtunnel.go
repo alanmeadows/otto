@@ -4,16 +4,27 @@ import (
 "bufio"
 "context"
 "crypto/rand"
+"encoding/json"
 "fmt"
 "log/slog"
+"os"
 "os/exec"
 "regexp"
 "strings"
 "sync"
 "syscall"
+"time"
 )
 
 var tunnelURLPattern = regexp.MustCompile(`https://[^\s]*\.devtunnels\.ms[^\s]*`)
+
+const bgtaskTunnelName = "otto-tunnel"
+
+// hasBgtask reports whether the bgtask binary is available in PATH.
+func hasBgtask() bool {
+	_, err := exec.LookPath("bgtask")
+	return err == nil
+}
 
 // Config controls tunnel creation and access.
 type Config struct {
@@ -29,10 +40,19 @@ cmd            *exec.Cmd
 mu             sync.Mutex
 url            string
 running        bool
+bgtaskManaged  bool // true when the tunnel is managed by bgtask
 port           int
 cancel         context.CancelFunc
 onStatusChange func(running bool, url string)
 config         Config
+}
+
+// IsBgtaskManaged reports whether the tunnel is running as a bgtask and should
+// survive Otto restarts.
+func (m *Manager) IsBgtaskManaged() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.bgtaskManaged
 }
 
 // NewManager returns a new tunnel Manager with default (authenticated) config.
@@ -120,12 +140,142 @@ return nil
 }
 
 // Start hosts a devtunnel on the given port.
+// When bgtask is available and a persistent tunnel ID is configured,
+// the tunnel runs as an independent bgtask that survives Otto restarts.
 func (m *Manager) Start(ctx context.Context, port int) error {
 m.mu.Lock()
 if m.running {
 m.mu.Unlock()
 return nil
 }
+
+// Use bgtask for persistent tunnels so the tunnel survives Otto restarts.
+if hasBgtask() && m.config.TunnelID != "" {
+m.mu.Unlock()
+return m.startBgtask(port)
+}
+
+m.mu.Unlock()
+return m.startDirect(ctx, port)
+}
+
+// startBgtask starts or attaches to a bgtask-managed tunnel.
+func (m *Manager) startBgtask(port int) error {
+	// Check if the bgtask tunnel is already running (e.g. Otto restarting).
+	if url := m.discoverBgtaskURL(); url != "" {
+		m.mu.Lock()
+		m.running = true
+		m.bgtaskManaged = true
+		m.url = url
+		m.port = port
+		cb := m.onStatusChange
+		m.mu.Unlock()
+
+		slog.Info("attached to existing bgtask tunnel", "url", url)
+		if cb != nil {
+			cb(true, url)
+		}
+		return nil
+	}
+
+	// Ensure persistent tunnel exists with correct access config.
+	if err := m.ensurePersistentTunnel(port); err != nil {
+		return fmt.Errorf("setting up persistent tunnel: %w", err)
+	}
+
+	// Remove stale bgtask state (ignore errors — may not exist).
+	exec.Command("bgtask", "rm", bgtaskTunnelName).Run() //nolint:errcheck
+
+	// Start the tunnel via bgtask with auto-restart.
+	args := []string{"run", "--name", bgtaskTunnelName, "--restart", "always",
+		"--", "devtunnel", "host", m.config.TunnelID}
+	cmd := exec.Command("bgtask", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("starting tunnel via bgtask: %w", err)
+	}
+
+	m.mu.Lock()
+	m.running = true
+	m.bgtaskManaged = true
+	m.port = port
+	cb := m.onStatusChange
+	m.mu.Unlock()
+
+	slog.Info("devtunnel started via bgtask", "tunnel_id", m.config.TunnelID)
+	if cb != nil {
+		cb(true, "")
+	}
+
+	// Poll for the URL in the background.
+	go m.pollBgtaskURL()
+	return nil
+}
+
+// discoverBgtaskURL checks if the otto-tunnel bgtask is running and extracts
+// the tunnel URL from its logs.
+func (m *Manager) discoverBgtaskURL() string {
+	cmd := exec.Command("bgtask", "status", "--json", bgtaskTunnelName)
+	out, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+	var info struct {
+		ChildAlive bool `json:"child_alive"`
+	}
+	if json.Unmarshal(out, &info) != nil || !info.ChildAlive {
+		return ""
+	}
+
+	// Read recent logs to find the URL.
+	logCmd := exec.Command("bgtask", "logs", "--tail", "100", bgtaskTunnelName)
+	logOut, err := logCmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	for _, line := range strings.Split(string(logOut), "\n") {
+		if match := tunnelURLPattern.FindString(line); match != "" {
+			if !strings.Contains(match, "-inspect") {
+				return match
+			}
+		}
+	}
+	return ""
+}
+
+// pollBgtaskURL polls bgtask logs until the tunnel URL appears.
+func (m *Manager) pollBgtaskURL() {
+	for i := 0; i < 60; i++ {
+		time.Sleep(500 * time.Millisecond)
+
+		m.mu.Lock()
+		if !m.running || !m.bgtaskManaged {
+			m.mu.Unlock()
+			return
+		}
+		m.mu.Unlock()
+
+		if url := m.discoverBgtaskURL(); url != "" {
+			m.mu.Lock()
+			m.url = url
+			cb := m.onStatusChange
+			m.mu.Unlock()
+
+			slog.Info("bgtask tunnel URL discovered", "url", url)
+			if cb != nil {
+				cb(true, url)
+			}
+			return
+		}
+	}
+	slog.Warn("timed out waiting for bgtask tunnel URL")
+}
+
+// startDirect starts the tunnel as a child process (original behavior).
+func (m *Manager) startDirect(ctx context.Context, port int) error {
+m.mu.Lock()
 
 ctx, cancel := context.WithCancel(ctx)
 m.cancel = cancel
@@ -240,6 +390,11 @@ m.mu.Unlock()
 return nil
 }
 
+if m.bgtaskManaged {
+m.mu.Unlock()
+return m.stopBgtask()
+}
+
 cancel := m.cancel
 cmd := m.cmd
 m.running = false
@@ -283,6 +438,27 @@ cb(false, "")
 }
 
 return nil
+}
+
+func (m *Manager) stopBgtask() error {
+	cmd := exec.Command("bgtask", "stop", bgtaskTunnelName)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("stopping tunnel bgtask: %s", strings.TrimSpace(string(out)))
+	}
+
+	m.mu.Lock()
+	m.running = false
+	m.bgtaskManaged = false
+	m.url = ""
+	cb := m.onStatusChange
+	m.mu.Unlock()
+
+	slog.Info("bgtask tunnel stopped")
+	if cb != nil {
+		cb(false, "")
+	}
+	return nil
 }
 
 // Status returns whether the tunnel is running and its public URL.

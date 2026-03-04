@@ -32,6 +32,10 @@ function connect() {
         setConnectionStatus('connected');
         state.reconnectDelay = 1000;
         send('get_sessions', {});
+        // Re-fetch active session history to catch messages missed while disconnected.
+        if (state.activeSession) {
+            send('get_history', { session_name: state.activeSession });
+        }
         fetchPRs();
         // Refresh PRs every 60 seconds.
         if (state.prPollTimer) clearInterval(state.prPollTimer);
@@ -66,6 +70,17 @@ function scheduleReconnect() {
     }, state.reconnectDelay);
     state.reconnectDelay = Math.min(state.reconnectDelay * 1.5, 10000);
 }
+
+// Reconnect immediately when the page becomes visible again (e.g. mobile
+// browser returning from background). Mobile OSes freeze timers and kill
+// WebSockets, so the normal reconnect loop may not fire promptly.
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (!state.ws || state.ws.readyState !== WebSocket.OPEN)) {
+        if (state.reconnectTimer) { clearTimeout(state.reconnectTimer); state.reconnectTimer = null; }
+        state.reconnectDelay = 1000;
+        connect();
+    }
+});
 
 function send(type, payload) {
     if (state.ws?.readyState === WebSocket.OPEN) {
@@ -885,6 +900,13 @@ function sendMessage() {
     const input = document.getElementById('chat-input');
     const prompt = input.value.trim();
     if (!prompt || !state.activeSession) return;
+    // Clear error state so the session can recover on retry.
+    const s = state.sessions.find(s => s.name === state.activeSession);
+    if (s && s.state === 'error') {
+        updateSessionState(state.activeSession, 'processing');
+        showActivity(true);
+        updateActivity('💭 Thinking...');
+    }
     send('send_message', { session_name: state.activeSession, prompt });
     // Don't append locally — the server broadcasts user_message to all clients
     // including us, so we'll get it back via handleUserMessage.
@@ -938,7 +960,8 @@ function doShare() {
     })
     .then(function(r) { return r.json(); })
     .then(function(data) {
-        var fullUrl = location.origin + data.url;
+        var origin = (state.tunnelRunning && state.tunnelKeyedURL) ? state.tunnelKeyedURL.split('?')[0] : location.origin;
+        var fullUrl = origin + data.url;
         var modeLabel = data.mode === 'readwrite' ? '✏️ Read-write' : '🔒 Read-only';
         navigator.clipboard.writeText(fullUrl).then(function() {
             alert(modeLabel + ' share link copied!\n\nExpires: ' + new Date(data.expires).toLocaleTimeString() + '\n\n' + fullUrl);

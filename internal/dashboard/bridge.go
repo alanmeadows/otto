@@ -183,6 +183,11 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 		go func() {
 			if err := b.manager.SendPrompt(ctx, sessionName, p.Prompt); err != nil {
 				slog.Warn("send prompt failed", "session", sessionName, "error", err)
+				b.broadcastFiltered(MsgSessionError, ErrorPayload{
+					SessionName: sessionName,
+					Message:     err.Error(),
+				}, sessionName)
+				b.broadcastSessionsList()
 			}
 		}()
 

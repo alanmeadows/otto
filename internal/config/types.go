@@ -68,6 +68,7 @@ type ServerConfig struct {
 	PollInterval string `json:"poll_interval"`
 	Port         int    `json:"port"`
 	LogDir       string `json:"log_dir"`
+	SourceDir    string `json:"source_dir"` // path to otto source for `otto server restart --reinstall`
 }
 
 // ParsePollInterval returns the poll interval as a time.Duration.

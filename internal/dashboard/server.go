@@ -96,6 +96,11 @@ func NewServer(cfg *config.Config) *Server {
 			bridge.BroadcastTunnelStatus(false, "devtunnel not installed")
 			return
 		}
+		if !tunnel.IsBgtaskInstalled() {
+			slog.Warn("bgtask is not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+			bridge.BroadcastTunnelStatus(false, "bgtask not installed")
+			return
+		}
 		port := cfg.Dashboard.Port
 		if port == 0 {
 			port = 4098
@@ -201,7 +206,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	}
 
 	// Auto-start tunnel if configured.
-	if s.cfg.Dashboard.AutoStartTunnel && s.tunnelMgr.IsInstalled() {
+	if s.cfg.Dashboard.AutoStartTunnel && s.tunnelMgr.IsInstalled() && tunnel.IsBgtaskInstalled() {
 		go func() {
 			if err := s.tunnelMgr.Start(ctx, port); err != nil {
 				slog.Warn("auto-start tunnel failed", "error", err)
@@ -220,10 +225,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		defer cancel()
 		s.srv.Shutdown(shutdownCtx)
 		s.manager.Stop()
-		// Don't stop bgtask-managed tunnels — they survive Otto restarts.
-		if !s.tunnelMgr.IsBgtaskManaged() {
-			s.tunnelMgr.Stop()
-		}
+		// bgtask-managed tunnels survive Otto restarts — don't stop them.
 	}()
 
 	slog.Info("starting dashboard server", "addr", addr)

@@ -66,6 +66,8 @@ const (
 	MsgAddAllowedUser       = "add_allowed_user"
 	MsgRemoveAllowedUser    = "remove_allowed_user"
 	MsgGetAllowedUsers      = "get_allowed_users"
+	MsgRestartServer        = "restart_server"
+	MsgUpgradeServer        = "upgrade_server"
 )
 
 // Server → Client

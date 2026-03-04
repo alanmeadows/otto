@@ -27,6 +27,8 @@ type Bridge struct {
 	onRemoveAllowedUser func(string)
 	onGetAllowedUsers   func() AllowedUsersListPayload
 	onGetTunnelStatus   func() TunnelStatusPayload
+	onRestartServer     func() error
+	onUpgradeServer     func() error
 }
 
 type wsClient struct {
@@ -282,6 +284,26 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 
 	case MsgGetAllowedUsers:
 		b.sendAllowedUsers(client)
+
+	case MsgRestartServer:
+		if b.onRestartServer != nil {
+			go func() {
+				if err := b.onRestartServer(); err != nil {
+					slog.Warn("restart server failed", "error", err)
+					b.sendTo(client, MsgSessionError, ErrorPayload{Message: "restart failed: " + err.Error()})
+				}
+			}()
+		}
+
+	case MsgUpgradeServer:
+		if b.onUpgradeServer != nil {
+			go func() {
+				if err := b.onUpgradeServer(); err != nil {
+					slog.Warn("upgrade server failed", "error", err)
+					b.sendTo(client, MsgSessionError, ErrorPayload{Message: "upgrade failed: " + err.Error()})
+				}
+			}()
+		}
 	}
 }
 

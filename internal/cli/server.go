@@ -28,10 +28,13 @@ var noDashboardFlag bool
 var dashboardOnlyFlag bool
 var dashboardPortFlag int
 var noTunnelFlag bool
+var upgradeChannelFlag string
 
 func init() {
 	serverCmd.AddCommand(serverStartCmd)
 	serverCmd.AddCommand(serverStopCmd)
+	serverCmd.AddCommand(serverRestartCmd)
+	serverCmd.AddCommand(serverUpgradeCmd)
 	serverCmd.AddCommand(serverStatusCmd)
 	serverCmd.AddCommand(serverInstallCmd)
 	serverCmd.AddCommand(serverLogsCmd)
@@ -42,6 +45,7 @@ func init() {
 	serverStartCmd.Flags().BoolVar(&dashboardOnlyFlag, "dashboard-only", false, "Run only the dashboard (skip PR monitoring)")
 	serverStartCmd.Flags().IntVar(&dashboardPortFlag, "dashboard-port", 0, "Dashboard port (default from config or 4098)")
 	serverStartCmd.Flags().BoolVar(&noTunnelFlag, "no-tunnel", false, "Disable Azure DevTunnel for dashboard")
+	serverUpgradeCmd.Flags().StringVar(&upgradeChannelFlag, "channel", "", "Upgrade channel: \"release\" (default) or \"main\" (build from source)")
 }
 
 var serverStartCmd = &cobra.Command{
@@ -128,6 +132,41 @@ Returns an error if no daemon is currently running.`,
 	},
 }
 
+var serverRestartCmd = &cobra.Command{
+	Use:   "restart",
+	Short: "Restart the otto daemon",
+	Long: `Restart the otto daemon via bgtask.
+
+The restart runs as an independent bgtask so it survives the current
+server process exiting. The dashboard will briefly disconnect and
+auto-reconnect after restart.`,
+	Example: `  otto server restart`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		fmt.Fprintln(cmd.OutOrStdout(), "restarting otto server via bgtask...")
+		return server.RestartDaemon()
+	},
+}
+
+var serverUpgradeCmd = &cobra.Command{
+	Use:   "upgrade",
+	Short: "Upgrade and restart the otto daemon",
+	Long: `Upgrade otto and restart the daemon.
+
+Default channel "release" installs the latest version via go install.
+Channel "main" builds from source (requires server.source_dir in config).
+The upgrade runs via bgtask so the binary is not locked during install.`,
+	Example: `  otto server upgrade
+  otto server upgrade --channel main`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		channel := appConfig.Server.UpgradeChannel
+		if upgradeChannelFlag != "" {
+			channel = upgradeChannelFlag
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "upgrading otto (channel: %s) via bgtask...\n", channelLabel(channel))
+		return server.UpgradeDaemon(channel, appConfig.Server.SourceDir)
+	},
+}
+
 var serverStatusCmd = &cobra.Command{
 	Use:   "status",
 	Short: "Show daemon status",
@@ -178,4 +217,11 @@ manage the service after installation.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return server.InstallSystemdService()
 	},
+}
+
+func channelLabel(ch string) string {
+	if ch == "main" {
+		return "main"
+	}
+	return "release"
 }

@@ -182,7 +182,20 @@ func NewServer(cfg *config.Config) *Server {
 		return p
 	}
 
+	bridge.onRestartServer = nil // wired by caller (server package) to avoid import cycle
+	bridge.onUpgradeServer = nil // wired by caller (server package) to avoid import cycle
+
 	return s
+}
+
+// SetRestartHandler sets the callback for restarting the server from the dashboard.
+func (s *Server) SetRestartHandler(fn func() error) {
+	s.bridge.onRestartServer = fn
+}
+
+// SetUpgradeHandler sets the callback for upgrading the server from the dashboard.
+func (s *Server) SetUpgradeHandler(fn func() error) {
+	s.bridge.onUpgradeServer = fn
 }
 
 // Start initializes the copilot manager and starts the HTTP server.

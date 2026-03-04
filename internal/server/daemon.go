@@ -438,3 +438,103 @@ WantedBy=default.target
 	fmt.Println("service enabled — start with: systemctl --user start otto")
 	return nil
 }
+
+// RestartDaemon stops the running daemon and starts it again via a bgtask
+// so the restart survives the current process exiting.
+func RestartDaemon() error {
+	if _, err := exec.LookPath("bgtask"); err != nil {
+		return fmt.Errorf("bgtask is required — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+	}
+
+	ottoBin, err := exec.LookPath("otto")
+	if err != nil {
+		return fmt.Errorf("cannot find otto binary in PATH: %w", err)
+	}
+
+	script := fmt.Sprintf(`#!/bin/bash
+set -e
+echo "$(date): stopping otto server..."
+%s server stop 2>/dev/null || true
+sleep 1
+echo "$(date): starting otto server..."
+%s server start
+echo "$(date): restart complete"
+`, ottoBin, ottoBin)
+
+	return runLifecycleScript("otto-restart", script)
+}
+
+// UpgradeDaemon stops the daemon, installs the latest version, and restarts.
+// channel is "release" (go install @latest) or "main" (build from sourceDir).
+func UpgradeDaemon(channel, sourceDir string) error {
+	if _, err := exec.LookPath("bgtask"); err != nil {
+		return fmt.Errorf("bgtask is required — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+	}
+
+	ottoBin, err := exec.LookPath("otto")
+	if err != nil {
+		return fmt.Errorf("cannot find otto binary in PATH: %w", err)
+	}
+
+	var installStep string
+	switch channel {
+	case "main":
+		if sourceDir == "" {
+			return fmt.Errorf("server.source_dir must be set in otto config for channel \"main\"")
+		}
+		sourceDir = expandHome(sourceDir)
+		installStep = fmt.Sprintf(`echo "$(date): building from source at %s..."
+cd %s
+git pull --ff-only
+make install`, sourceDir, sourceDir)
+	default: // "release" or empty
+		installStep = `echo "$(date): installing latest release via go install..."
+GOBIN=~/.local/bin go install github.com/alanmeadows/otto/cmd/otto@latest`
+	}
+
+	script := fmt.Sprintf(`#!/bin/bash
+set -e
+echo "$(date): stopping otto server..."
+%s server stop 2>/dev/null || true
+sleep 1
+
+%s
+
+echo "$(date): starting otto server..."
+%s server start
+echo "$(date): upgrade complete"
+`, ottoBin, installStep, ottoBin)
+
+	return runLifecycleScript("otto-upgrade", script)
+}
+
+// runLifecycleScript writes a shell script to a temp file and runs it via
+// bgtask so it survives the current process exiting.
+func runLifecycleScript(name, script string) error {
+	// Write script to temp file.
+	f, err := os.CreateTemp("", name+"-*.sh")
+	if err != nil {
+		return fmt.Errorf("creating temp script: %w", err)
+	}
+	if _, err := f.WriteString(script); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return fmt.Errorf("writing script: %w", err)
+	}
+	f.Close()
+
+	// Remove stale bgtask state.
+	exec.Command("bgtask", "rm", name).Run() //nolint:errcheck
+
+	slog.Info("running lifecycle script via bgtask", "name", name, "script", f.Name())
+
+	cmd := exec.Command("bgtask", "run", "--name", name, "--", "bash", f.Name())
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		os.Remove(f.Name())
+		return fmt.Errorf("starting %s via bgtask: %w", name, err)
+	}
+
+	return nil
+}

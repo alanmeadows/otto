@@ -73,6 +73,10 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 			dashSrv := dashboard.NewServer(cfg)
 			dashSrv.ListPRsFn = func() (any, error) { return ListPRs() }
 			dashSrv.GetPRFn = func(id string) (any, error) { return FindPRDetail(id) }
+			dashSrv.SetRestartHandler(func() error { return RestartDaemon() })
+			dashSrv.SetUpgradeHandler(func() error {
+				return UpgradeDaemon(cfg.Server.UpgradeChannel, cfg.Server.SourceDir)
+			})
 			if err := dashSrv.Start(ctx, dashPort); err != nil {
 				slog.Error("dashboard server error", "error", err)
 			}

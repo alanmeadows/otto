@@ -65,10 +65,11 @@ type RepoConfig struct {
 
 // ServerConfig holds daemon settings.
 type ServerConfig struct {
-	PollInterval string `json:"poll_interval"`
-	Port         int    `json:"port"`
-	LogDir       string `json:"log_dir"`
-	SourceDir    string `json:"source_dir"` // path to otto source for `otto server restart --reinstall`
+	PollInterval   string `json:"poll_interval"`
+	Port           int    `json:"port"`
+	LogDir         string `json:"log_dir"`
+	SourceDir      string `json:"source_dir,omitempty"`       // path to otto source for dev upgrades (git pull && make install)
+	UpgradeChannel string `json:"upgrade_channel,omitempty"`  // "release" (default, go install @latest) or "main" (build from source_dir)
 }
 
 // ParsePollInterval returns the poll interval as a time.Duration.

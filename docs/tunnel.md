@@ -86,10 +86,12 @@ otto config set dashboard.auto_start_tunnel true
 
 ### Process Lifecycle
 
-The devtunnel process is bound to otto's lifecycle:
-- `Pdeathsig` ensures the kernel kills devtunnel if otto crashes
-- `Setpgid` allows killing the entire process group on shutdown
-- No orphaned tunnel processes after otto exits
+The devtunnel runs as an independent [bgtask](https://github.com/philsphicas/bgtask) with `--restart always`:
+
+- The tunnel **survives otto restarts** — remote connections stay up across `otto server restart` and `otto server upgrade`
+- On restart, otto discovers and attaches to the existing tunnel via `bgtask status`
+- Explicit stop from the dashboard or `otto server stop` will not kill the tunnel — use `bgtask stop otto-tunnel` to stop it manually
+- bgtask must be installed: `go install github.com/philsphicas/bgtask/cmd/bgtask@latest`
 
 ## All Config Keys
 
@@ -98,4 +100,5 @@ The devtunnel process is bound to otto's lifecycle:
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL |
 | `dashboard.tunnel_access` | string | `authenticated` | `anonymous`, `tenant`, or `authenticated` |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
+| `dashboard.tunnel_allow_emails` | string[] | | Specific email addresses to grant tunnel access |
 | `dashboard.auto_start_tunnel` | bool | `false` | Auto-start tunnel with dashboard |

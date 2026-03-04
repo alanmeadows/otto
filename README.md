@@ -65,6 +65,7 @@ make install      # installs to ~/.local/bin
 ### Prerequisites
 
 - **GitHub Copilot CLI** — `npm install -g @github/copilot`
+- **bgtask** (required for tunnel management) — `go install github.com/philsphicas/bgtask/cmd/bgtask@latest`
 - **devtunnel** (optional, for remote access) — `curl -sL https://aka.ms/DevTunnelCliInstall | bash`
 
 ## Quick Start
@@ -175,13 +176,15 @@ Tracked repos are also used by the PR autopilot to map PR branches to local work
 
 ### Session Sharing
 
-Click **🔗 Share** in any active session to generate a read-only link (1-hour default expiry):
+Click **🔗 Share** in any active session to generate a share link (configurable expiry and mode):
 
 ```
 https://your-tunnel.devtunnels.ms/shared/6548666f0382549d...
 ```
 
-The recipient sees the conversation streaming live — tool calls, responses, intent changes — but no ability to send messages or access other sessions.
+Share links support two modes:
+- **Read-only** — the recipient sees the conversation streaming live (tool calls, responses, intent changes) but cannot send messages
+- **Read-write** — the recipient enters a nickname and can send messages into the session alongside the owner
 
 ### Remote Access
 
@@ -237,12 +240,17 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `pr.max_fix_attempts` | int | `5` | Max auto-fix attempts per PR |
 | `pr.providers.ado.organization` | string | | ADO organization name |
 | `pr.providers.ado.project` | string | | ADO project name |
-| `pr.providers.ado.pat` | string | | ADO personal access token |
+| `pr.providers.ado.pat` | string | | ADO personal access token (fallback for `az cli`) |
 | `pr.providers.ado.auto_complete` | bool | `false` | Auto-complete ADO PRs |
 | `pr.providers.ado.merlinbot` | bool | `false` | Enable MerlinBot integration |
+| `pr.providers.ado.create_work_item` | bool | `false` | Create ADO work items for PR fixes |
+| `pr.providers.ado.work_item_area_path` | string | | ADO area path for created work items |
 | `pr.providers.github.token` | string | | GitHub personal access token |
 | `server.poll_interval` | string | `10m` | Daemon PR poll interval |
 | `server.port` | int | `4097` | Daemon HTTP API port |
+| `server.log_dir` | string | `~/.local/share/otto/logs` | Daemon log directory |
+| `server.source_dir` | string | | Path to otto source for `upgrade --channel main` |
+| `server.upgrade_channel` | string | `release` | Upgrade channel: `release` (go install @latest) or `main` (build from source) |
 | `dashboard.port` | int | `4098` | Dashboard web server port |
 | `dashboard.enabled` | bool | `false` | Enable the Copilot session dashboard |
 | `dashboard.auto_start_tunnel` | bool | `false` | Auto-start Azure DevTunnel on dashboard start |
@@ -250,6 +258,10 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
 | `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated) |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
+| `dashboard.tunnel_allow_emails` | string[] | | Specific email addresses to grant tunnel access |
+| `dashboard.owner_email` | string | | Dashboard owner email (auto-detected from tunnel JWT if empty) |
+| `dashboard.owner_nickname` | string | `owner` | Display name for session owner in chat bubbles |
+| `dashboard.allowed_users` | string[] | | Emails allowed full dashboard access |
 | `notifications.teams_webhook_url` | string | | Microsoft Teams webhook URL |
 | `notifications.events` | string[] | | Events to notify on |
 
@@ -279,7 +291,11 @@ otto                          LLM-powered PR lifecycle manager
 │   │   ├── --dashboard-port  Dashboard port (default: 4098)
 │   │   └── --foreground      Run in foreground
 │   ├── stop                  Stop the daemon
+│   ├── restart               Restart the daemon (via bgtask)
+│   ├── upgrade               Stop, install latest, restart (via bgtask)
+│   │   └── --channel         "release" (go install @latest) or "main" (source)
 │   ├── status                Show daemon status
+│   ├── logs                  Show daemon log file path
 │   └── install               Install as systemd user service
 ├── repo                      Manage repositories
 │   ├── add [name]            Register a repository
@@ -310,7 +326,8 @@ otto                          LLM-powered PR lifecycle manager
 │  └──────────────────────────────────────────────────────┘   │
 │                                                             │
 │  ┌──────────────────────────────────────────────────────┐   │
-│  │ DevTunnel Manager                                    │   │
+│  │ DevTunnel Manager (via bgtask)                       │   │
+│  │ Tunnel survives otto restarts · auto-restart always  │   │
 │  │ Entra ID / GitHub org / anonymous access control     │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘

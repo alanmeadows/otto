@@ -137,6 +137,9 @@ function Register-AttestationPolicy {
 }
 
 function Main {
+    [CmdletBinding()]
+    param()
+
     Write-Output "Initializing cluster-shared HGS guardian '$GuardianName'..."
 
     # Step 1: Retrieve the signing certificate from the machine store.

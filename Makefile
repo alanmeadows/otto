@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-.PHONY: all build test lint vet install clean
+.PHONY: all build test lint vet install clean regenerate-all
 
 all: lint vet test build
 
@@ -20,6 +20,9 @@ vet:
 install: build
 	@mkdir -p ~/.local/bin
 	cp bin/otto ~/.local/bin/otto
+
+regenerate-all:
+	go generate ./...
 
 clean:
 	rm -rf ./bin/

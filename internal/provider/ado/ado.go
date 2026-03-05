@@ -869,7 +869,7 @@ func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID s
 			"buildID", buildID, "error", err)
 	}
 
-	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true&api-version=7.1-preview",
+	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true",
 		url.PathEscape(org), url.PathEscape(project), buildID)
 
 	resp, err := b.doRequest(ctx, http.MethodPatch, path, map[string]any{"retry": true})

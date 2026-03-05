@@ -1,0 +1,27 @@
+%% Attestation Services — TrustedLaunch / vTPM attestation flow
+%% Renders to: attestation-services.png
+flowchart LR
+    subgraph VM["Virtual Machine"]
+        vTPM["vTPM"]
+        Boot["Secure Boot"]
+    end
+
+    subgraph Cluster["HCI Cluster"]
+        HGS["Host Guardian\nService"]
+        Guardian["Cluster-Shared\nGuardian"]
+    end
+
+    subgraph Verification["Attestation Pipeline"]
+        Collect["Collect\nMeasurements"]
+        Validate["Validate\nPlatform State"]
+        Issue["Issue\nHealth Cert"]
+    end
+
+    vTPM -->|PCR quotes| Collect
+    Boot -->|UEFI measurements| Collect
+    Collect --> HGS
+    HGS --> Guardian
+    Guardian --> Validate
+    Validate -->|pass| Issue
+    Validate -->|fail| Deny["Deny\nAttestation"]
+    Issue -->|health certificate| VM

@@ -1,0 +1,35 @@
+%% Guardian Architecture — Cluster-shared HGS guardian model
+%% Renders to: guardian-architecture.png
+flowchart TB
+    subgraph Cluster["HCI Cluster"]
+        Node1["Node 1"]
+        Node2["Node 2"]
+        Node3["Node 3"]
+    end
+
+    subgraph HGSService["Host Guardian Service"]
+        Guardian["Cluster-Shared\nGuardian"]
+        KeyStore["Key Protector\nStore"]
+        Policy["Attestation\nPolicy"]
+    end
+
+    subgraph VMs["Shielded / TrustedLaunch VMs"]
+        VM1["VM A\n(vTPM)"]
+        VM2["VM B\n(vTPM)"]
+        VM3["VM C\n(vTPM)"]
+    end
+
+    Node1 -->|register host| Guardian
+    Node2 -->|register host| Guardian
+    Node3 -->|register host| Guardian
+
+    Guardian --> Policy
+    Guardian --> KeyStore
+
+    VM1 -->|attest via node| Guardian
+    VM2 -->|attest via node| Guardian
+    VM3 -->|attest via node| Guardian
+
+    KeyStore -->|key protector| VM1
+    KeyStore -->|key protector| VM2
+    KeyStore -->|key protector| VM3

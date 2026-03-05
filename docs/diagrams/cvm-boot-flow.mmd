@@ -1,0 +1,14 @@
+%% CVM Boot Flow — Confidential VM boot sequence with vTPM
+%% Renders to: cvm-boot-flow.png
+flowchart TD
+    Start["Power On"] --> UEFI["UEFI Firmware\nInit"]
+    UEFI --> SecureBoot["Secure Boot\nVerification"]
+    SecureBoot --> vTPMInit["vTPM\nInitialization"]
+    vTPMInit --> Measure["Measure Boot\nComponents\n(PCR extend)"]
+    Measure --> Attest["Request\nAttestation"]
+    Attest --> HGS["HGS Validates\nPlatform State"]
+    HGS -->|attested| KeyRelease["Release\nKey Protector"]
+    HGS -->|denied| Halt["Boot Halted"]
+    KeyRelease --> Unlock["Unlock\nEncrypted Disks"]
+    Unlock --> OSBoot["OS Boot\nCompletes"]
+    OSBoot --> Running["VM Running\n(Trusted)"]

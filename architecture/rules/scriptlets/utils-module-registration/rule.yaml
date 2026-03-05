@@ -1,0 +1,29 @@
+name: utils-module-registration
+description: >
+  Validates that PowerShell utility modules (scriptlets) use proper module
+  registration patterns, including CmdletBinding attributes and secure
+  credential handling.
+scope:
+  - "scripts/**/*.ps1"
+checks:
+  - id: cmdletbinding-required
+    description: All exported functions must declare [CmdletBinding()].
+    pattern: "function\\s+\\w+.*\\{(?:(?!\\[CmdletBinding\\(\\)\\]).)*\\}"
+    severity: error
+  - id: no-plaintext-securestring
+    description: ConvertTo-SecureString must not be used with -AsPlainText.
+    pattern: "ConvertTo-SecureString.*-AsPlainText"
+    severity: error
+tests:
+  - file: tests/valid-module.ps1
+    expect: pass
+  - file: tests/valid-certificate-auth.ps1
+    expect: pass
+  - file: tests/invalid-missing-cmdletbinding.ps1
+    expect: fail
+    violations:
+      - cmdletbinding-required
+  - file: tests/invalid-plaintext-secret.ps1
+    expect: fail
+    violations:
+      - no-plaintext-securestring

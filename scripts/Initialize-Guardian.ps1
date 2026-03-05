@@ -163,4 +163,7 @@ function Main {
     return $guardian
 }
 
-Main
+# Only run Main when invoked directly (not when dot-sourced or analyzed).
+if ($MyInvocation.InvocationName -ne '.') {
+    Main
+}

@@ -2,12 +2,12 @@
 # Expected: FAIL — uses ConvertTo-SecureString with -AsPlainText (security violation)
 # PSScriptAnalyzer suppression: this file intentionally demonstrates a prohibited pattern.
 
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
 [CmdletBinding()]
 param()
 
 function Initialize-BadCredential {
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingConvertToSecureStringWithPlainText', '')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingPlainTextForPassword', '')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]

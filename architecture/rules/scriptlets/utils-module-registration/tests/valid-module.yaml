@@ -1,0 +1,2 @@
+input: valid-module.ps1
+expect: pass

@@ -692,3 +692,106 @@ func TestWorkflowAddressBot(t *testing.T) {
 	require.NoError(t, err)
 	// This currently just logs; no error expected.
 }
+
+func TestRetryBuild_DeletesArtifactsFirst(t *testing.T) {
+	var artifactListCalled, artifactDeletedCollect, artifactDeletedCleanup, retryCalled bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
+			artifactListCalled = true
+			json.NewEncoder(w).Encode(map[string]any{
+				"count": 2,
+				"value": []map[string]any{
+					{"id": 1, "name": "drop_windows_api_testing_collect_results"},
+					{"id": 2, "name": "drop_windows_api_testing_cleanup_propagator"},
+				},
+			})
+
+		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/artifacts"):
+			name := r.URL.Query().Get("artifactName")
+			switch name {
+			case "drop_windows_api_testing_collect_results":
+				artifactDeletedCollect = true
+			case "drop_windows_api_testing_cleanup_propagator":
+				artifactDeletedCleanup = true
+			}
+			w.WriteHeader(http.StatusNoContent)
+
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/builds/99999") && r.URL.Query().Get("retry") == "true":
+			retryCalled = true
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": 99999})
+
+		default:
+			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	b := newTestBackend(t, server)
+	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
+
+	err := b.RetryBuild(context.Background(), pr, "99999")
+	require.NoError(t, err)
+
+	assert.True(t, artifactListCalled, "should list artifacts before retry")
+	assert.True(t, artifactDeletedCollect, "should delete collect_results artifact")
+	assert.True(t, artifactDeletedCleanup, "should delete cleanup_propagator artifact")
+	assert.True(t, retryCalled, "should issue retry after artifact cleanup")
+}
+
+func TestRetryBuild_NoArtifacts(t *testing.T) {
+	var retryCalled bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
+			json.NewEncoder(w).Encode(map[string]any{"count": 0, "value": []any{}})
+
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/builds/100") && r.URL.Query().Get("retry") == "true":
+			retryCalled = true
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": 100})
+
+		default:
+			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	b := newTestBackend(t, server)
+	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
+
+	err := b.RetryBuild(context.Background(), pr, "100")
+	require.NoError(t, err)
+	assert.True(t, retryCalled, "should still retry even with no artifacts")
+}
+
+func TestRetryBuild_ArtifactCleanupFailureDoesNotBlockRetry(t *testing.T) {
+	var retryCalled bool
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
+			// Return a server error for artifact listing.
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/builds/200") && r.URL.Query().Get("retry") == "true":
+			retryCalled = true
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"id": 200})
+
+		default:
+			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	b := newTestBackend(t, server)
+	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
+
+	err := b.RetryBuild(context.Background(), pr, "200")
+	require.NoError(t, err)
+	assert.True(t, retryCalled, "should proceed with retry even if artifact cleanup fails")
+}

@@ -156,3 +156,15 @@ type adoPullRequestList struct {
 	Value []adoPullRequest `json:"value"`
 	Count int              `json:"count"`
 }
+
+// adoArtifact represents a build artifact from the ADO builds API.
+type adoArtifact struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// adoArtifactList is the envelope for the build artifacts list API response.
+type adoArtifactList struct {
+	Value []adoArtifact `json:"value"`
+	Count int           `json:"count"`
+}

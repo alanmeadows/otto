@@ -858,9 +858,16 @@ func (b *Backend) resolveRepo(pr *provider.PRInfo) string {
 var _ provider.PRBackend = (*Backend)(nil)
 
 // RetryBuild retries a failed build by its ID using the ADO REST API.
+// It first deletes any existing artifacts from the build to prevent
+// "artifact already exists" errors on retry.
 func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
 	org := b.resolveOrg(pr)
 	project := b.resolveProject(pr)
+
+	if err := b.deleteBuildArtifacts(ctx, org, project, buildID); err != nil {
+		slog.Warn("failed to clean up build artifacts before retry (continuing anyway)",
+			"buildID", buildID, "error", err)
+	}
 
 	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true&api-version=7.1-preview",
 		url.PathEscape(org), url.PathEscape(project), buildID)
@@ -876,6 +883,58 @@ func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID s
 	}
 
 	slog.Info("build retry queued", "buildID", buildID, "prID", pr.ID)
+	return nil
+}
+
+// deleteBuildArtifacts removes all existing artifacts from a build so that
+// a retry does not fail with "artifact already exists" errors.
+func (b *Backend) deleteBuildArtifacts(ctx context.Context, org, project, buildID string) error {
+	listPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts",
+		url.PathEscape(org), url.PathEscape(project), buildID)
+
+	resp, err := b.doRequest(ctx, http.MethodGet, listPath, nil)
+	if err != nil {
+		return fmt.Errorf("listing artifacts for build %s: %w", buildID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("listing artifacts for build %s returned status %d", buildID, resp.StatusCode)
+	}
+
+	var artifacts adoArtifactList
+	if err := json.NewDecoder(resp.Body).Decode(&artifacts); err != nil {
+		return fmt.Errorf("decoding artifacts for build %s: %w", buildID, err)
+	}
+
+	if len(artifacts.Value) == 0 {
+		return nil
+	}
+
+	slog.Info("deleting build artifacts before retry",
+		"buildID", buildID, "count", len(artifacts.Value))
+
+	var errs []string
+	for _, a := range artifacts.Value {
+		delPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts?artifactName=%s",
+			url.PathEscape(org), url.PathEscape(project), buildID,
+			url.QueryEscape(a.Name))
+
+		delResp, err := b.doRequest(ctx, http.MethodDelete, delPath, nil)
+		if err != nil {
+			errs = append(errs, fmt.Sprintf("%s: %v", a.Name, err))
+			continue
+		}
+		delResp.Body.Close()
+
+		if delResp.StatusCode != http.StatusOK && delResp.StatusCode != http.StatusNoContent {
+			errs = append(errs, fmt.Sprintf("%s: status %d", a.Name, delResp.StatusCode))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to delete some artifacts: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 

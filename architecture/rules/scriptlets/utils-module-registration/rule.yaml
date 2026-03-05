@@ -15,15 +15,15 @@ checks:
     pattern: "ConvertTo-SecureString.*-AsPlainText"
     severity: error
 tests:
-  - file: tests/valid-module.ps1
+  - input: tests/valid-module.ps1
     expect: pass
-  - file: tests/valid-certificate-auth.ps1
+  - input: tests/valid-certificate-auth.ps1
     expect: pass
-  - file: tests/invalid-missing-cmdletbinding.ps1
+  - input: tests/invalid-missing-cmdletbinding.ps1
     expect: fail
     violations:
       - cmdletbinding-required
-  - file: tests/invalid-plaintext-secret.ps1
+  - input: tests/invalid-plaintext-secret.ps1
     expect: fail
     violations:
       - no-plaintext-securestring

@@ -7,8 +7,8 @@
     local machine certificate store. The guardian is configured as the
     cluster-shared guardian for shielded and TrustedLaunch VMs.
 
-    This script does NOT use ConvertTo-SecureString with plaintext strings.
-    All credentials are handled via certificate-based protection.
+    This script uses certificate-based protection, not plaintext secure strings.
+    All credentials are handled via X509 certificates from the machine store.
 
 .PARAMETER GuardianName
     Friendly name for the cluster-shared guardian.

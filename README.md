@@ -122,16 +122,14 @@ Otto will now poll the PR and automatically:
 ### 4. Start the dashboard
 
 ```bash
-# The dashboard and tunnel auto-start when configured (copilot_server or tunnel_id set).
+# The dashboard and tunnel are enabled by default.
 # Just start the server:
 otto server start
 
-# To disable the dashboard or tunnel explicitly:
+# To disable specific features:
 otto server start --no-dashboard
 otto server start --no-tunnel
-
-# Run only the dashboard (skip PR monitoring):
-otto server start --dashboard-only
+otto server start --no-pr-monitoring
 ```
 
 Open **http://localhost:4098** in your browser. The dashboard shows:
@@ -321,8 +319,8 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `server.source_dir` | string | | Path to otto source for `upgrade --channel main` |
 | `server.upgrade_channel` | string | `release` | Upgrade channel: `release` (go install @latest) or `main` (build from source) |
 | `dashboard.port` | int | `4098` | Dashboard web server port |
-| `dashboard.enabled` | bool | `false` | Enable the Copilot session dashboard |
-| `dashboard.auto_start_tunnel` | bool | `false` | Auto-start Azure DevTunnel on dashboard start |
+| `dashboard.enabled` | bool | `true` | Enable the Copilot session dashboard |
+| `dashboard.auto_start_tunnel` | bool | `true` | Auto-start Azure DevTunnel on dashboard start |
 | `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
 | `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated) |
@@ -356,10 +354,10 @@ otto                          LLM-powered PR lifecycle manager
 │   └── submit                Submit the current branch as a PR
 ├── server                    Manage the otto daemon
 │   ├── start                 Start the daemon
-│   │   ├── --no-dashboard    Disable Copilot session dashboard
-│   │   ├── --no-tunnel       Disable Azure DevTunnel
-│   │   ├── --dashboard-only  Run only the dashboard (skip PR monitoring)
-│   │   ├── --dashboard-port  Dashboard port (default: 4098)
+│   │   ├── --no-dashboard       Disable Copilot session dashboard
+│   │   ├── --no-tunnel          Disable Azure DevTunnel
+│   │   ├── --no-pr-monitoring   Disable PR monitoring loop
+│   │   ├── --dashboard-port     Dashboard port (default: 4098)
 │   │   ├── --port            Server port (default: 4097)
 │   │   └── --foreground      Run in foreground
 │   ├── stop                  Stop the daemon

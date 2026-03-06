@@ -70,6 +70,7 @@ type ServerConfig struct {
 	LogDir         string `json:"log_dir"`
 	SourceDir      string `json:"source_dir,omitempty"`       // path to otto source for dev upgrades (git pull && make install)
 	UpgradeChannel string `json:"upgrade_channel,omitempty"`  // "release" (default, go install @latest) or "main" (build from source_dir)
+	NoPRMonitoring bool   `json:"-"`                          // runtime-only: skip PR monitoring loop
 }
 
 // ParsePollInterval returns the poll interval as a time.Duration.
@@ -120,9 +121,10 @@ func DefaultConfig() Config {
 			LogDir:       "~/.local/share/otto/logs",
 		},
 		Dashboard: DashboardConfig{
-			Port:          4098,
-			Enabled:       false,
-			OwnerNickname: "owner",
+			Port:            4098,
+			Enabled:         true,
+			AutoStartTunnel: true,
+			OwnerNickname:   "owner",
 		},
 	}
 }

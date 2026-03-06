@@ -46,19 +46,23 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 
 	var wg sync.WaitGroup
 
-	// Start the monitoring loop in background.
-	llmClient := llm.NewCopilotClient(cfg.Models.Primary)
-	if err := llmClient.Start(ctx); err != nil {
-		slog.Warn("Copilot LLM client not available — PR monitoring disabled", "error", err)
+	// Start the monitoring loop in background (unless disabled).
+	if cfg.Server.NoPRMonitoring {
+		slog.Info("PR monitoring disabled via --no-pr-monitoring")
 	} else {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			defer llmClient.Stop()
-			if err := RunMonitorLoop(ctx, cfg, llmClient); err != nil {
-				slog.Error("monitoring loop error", "error", err)
-			}
-		}()
+		llmClient := llm.NewCopilotClient(cfg.Models.Primary)
+		if err := llmClient.Start(ctx); err != nil {
+			slog.Warn("Copilot LLM client not available — PR monitoring disabled", "error", err)
+		} else {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer llmClient.Stop()
+				if err := RunMonitorLoop(ctx, cfg, llmClient); err != nil {
+					slog.Error("monitoring loop error", "error", err)
+				}
+			}()
+		}
 	}
 
 	// Start dashboard server if enabled.

@@ -26,7 +26,7 @@ or installed as a systemd user service for persistent operation.`,
 var foregroundFlag bool
 var portFlag int
 var noDashboardFlag bool
-var dashboardOnlyFlag bool
+var noPRMonitoringFlag bool
 var dashboardPortFlag int
 var noTunnelFlag bool
 var upgradeChannelFlag string
@@ -43,7 +43,7 @@ func init() {
 	serverStartCmd.Flags().BoolVar(&foregroundFlag, "foreground", false, "Run in foreground (don't daemonize)")
 	serverStartCmd.Flags().IntVar(&portFlag, "port", 0, "Server port (default from config or 4097)")
 	serverStartCmd.Flags().BoolVar(&noDashboardFlag, "no-dashboard", false, "Disable the Copilot session dashboard")
-	serverStartCmd.Flags().BoolVar(&dashboardOnlyFlag, "dashboard-only", false, "Run only the dashboard (skip PR monitoring)")
+	serverStartCmd.Flags().BoolVar(&noPRMonitoringFlag, "no-pr-monitoring", false, "Disable PR monitoring loop")
 	serverStartCmd.Flags().IntVar(&dashboardPortFlag, "dashboard-port", 0, "Dashboard port (default from config or 4098)")
 	serverStartCmd.Flags().BoolVar(&noTunnelFlag, "no-tunnel", false, "Disable Azure DevTunnel for dashboard")
 	serverUpgradeCmd.Flags().StringVar(&upgradeChannelFlag, "channel", "", "Upgrade channel: \"release\" (default) or \"main\" (build from source)")
@@ -58,16 +58,15 @@ By default the daemon forks into the background. Use --foreground
 to run in the current terminal (useful for debugging). The port
 defaults to the config value or 4097.
 
-The dashboard is enabled by default when a copilot_server or
-tunnel_id is configured. Use --no-dashboard to disable it.
-The tunnel auto-starts when a tunnel_id is configured.
-Use --no-tunnel to disable it.`,
+The dashboard and tunnel are enabled by default. Use --no-dashboard
+or --no-tunnel to disable them. Use --no-pr-monitoring to skip the
+PR polling loop (dashboard-only mode).`,
 	Example: `  otto server start
   otto server start --foreground
   otto server start --port 9090
   otto server start --no-dashboard
   otto server start --no-tunnel
-  otto server start --dashboard-only`,
+  otto server start --no-pr-monitoring`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := portFlag
 		if port == 0 {
@@ -78,25 +77,19 @@ Use --no-tunnel to disable it.`,
 		}
 		logDir := appConfig.Server.LogDir
 
-		// Dashboard is enabled by default if there's dashboard config;
-		// --no-dashboard explicitly disables it.
-		dashboardEnabled := appConfig.Dashboard.Enabled ||
-			appConfig.Dashboard.CopilotServer != "" ||
-			appConfig.Dashboard.TunnelID != "" ||
-			dashboardOnlyFlag
+		// Dashboard is enabled by default; --no-dashboard disables it.
+		dashboardEnabled := appConfig.Dashboard.Enabled
 		if noDashboardFlag {
 			dashboardEnabled = false
 		}
 
-		// Tunnel is enabled by default if tunnel_id is configured;
-		// --no-tunnel explicitly disables it.
-		tunnelEnabled := appConfig.Dashboard.AutoStartTunnel ||
-			appConfig.Dashboard.TunnelID != ""
+		// Tunnel is enabled by default; --no-tunnel disables it.
+		tunnelEnabled := appConfig.Dashboard.AutoStartTunnel
 		if noTunnelFlag || !dashboardEnabled {
 			tunnelEnabled = false
 		}
 
-		if dashboardEnabled || dashboardOnlyFlag {
+		if dashboardEnabled {
 			appConfig.Dashboard.Enabled = true
 			os.Setenv("OTTO_DASHBOARD", "1")
 		}
@@ -110,6 +103,9 @@ Use --no-tunnel to disable it.`,
 		}
 		if verbose {
 			os.Setenv("OTTO_VERBOSE", "1")
+		}
+		if noPRMonitoringFlag {
+			os.Setenv("OTTO_NO_PR_MONITORING", "1")
 		}
 
 		return server.StartDaemon(port, logDir, foregroundFlag)
@@ -204,7 +200,7 @@ Displays the PID, uptime, endpoints, and tunnel URL when active.`,
 		if dashPort == 0 {
 			dashPort = 4098
 		}
-		if cfg.Dashboard.Enabled || cfg.Dashboard.CopilotServer != "" || cfg.Dashboard.TunnelID != "" {
+		if cfg.Dashboard.Enabled {
 			fmt.Fprintf(cmd.OutOrStdout(), "  dashboard: http://localhost:%d\n", dashPort)
 
 			// Query the dashboard for tunnel status.

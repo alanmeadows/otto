@@ -432,17 +432,29 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 			}
 		}
 
-		// Detect actively running sessions by checking events.jsonl ModTime.
-		// If it was modified in the last 60 seconds, the session is likely mid-turn.
-		if evInfo, err := os.Stat(filepath.Join(ps.Path, "events.jsonl")); err == nil {
-			evMod := evInfo.ModTime()
-			if evMod.After(ps.LastModified) {
-				ps.LastModified = evMod
-				ps.updatedTime = evMod
+		// Detect actively running sessions by checking the most recent
+		// modification across session files. A 5-minute window accounts for
+		// long tool calls (builds, tests) where events.jsonl isn't written.
+		latestMod := ps.LastModified
+		for _, fname := range []string{"events.jsonl", "workspace.yaml"} {
+			if fi, err := os.Stat(filepath.Join(ps.Path, fname)); err == nil {
+				if fi.ModTime().After(latestMod) {
+					latestMod = fi.ModTime()
+				}
 			}
-			if time.Since(evMod) < 60*time.Second {
-				ps.IsActive = true
+		}
+		// Also check the checkpoints dir.
+		if fi, err := os.Stat(filepath.Join(ps.Path, "checkpoints", "index.md")); err == nil {
+			if fi.ModTime().After(latestMod) {
+				latestMod = fi.ModTime()
 			}
+		}
+		if latestMod.After(ps.LastModified) {
+			ps.LastModified = latestMod
+			ps.updatedTime = latestMod
+		}
+		if time.Since(latestMod) < 5*time.Minute {
+			ps.IsActive = true
 		}
 
 		result = append(result, ps)

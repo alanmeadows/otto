@@ -427,8 +427,10 @@ function renderPersistedSessionList() {
         card.onclick = () => handlePersistedSessionClick(p.session_id);
         const shortId = p.session_id.substring(0, 8);
         const summary = p.summary || 'No summary';
-        const ago = p.updated_at ? timeAgo(p.updated_at) : '';
-        const agoClass = isRecentlyActive(p.updated_at) ? 'recently-active' : '';
+        // Use last_modified (filesystem-based) for recency, not updated_at (DB).
+        const agoSource = p.last_modified || p.updated_at;
+        const ago = agoSource ? timeAgo(agoSource) : '';
+        const agoClass = p.is_active ? 'recently-active' : (isRecentlyActive(agoSource) ? 'recently-active' : '');
         const activeDot = p.is_active ? '<span class="persisted-card-active" title="Session is actively running"></span>' : '';
         card.innerHTML = `
             <div class="persisted-card-header">

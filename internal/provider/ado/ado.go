@@ -859,14 +859,34 @@ var _ provider.PRBackend = (*Backend)(nil)
 
 // RetryBuild retries a failed build by its ID using the ADO REST API.
 // It first deletes any existing artifacts from the build to prevent
-// "artifact already exists" errors on retry.
+// "artifact already exists" errors on retry. If artifact cleanup cannot
+// be verified (artifacts still present after deletion), it falls back
+// to queuing a fresh build for the same pipeline definition and branch.
 func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
 	org := b.resolveOrg(pr)
 	project := b.resolveProject(pr)
 
 	if err := b.deleteBuildArtifacts(ctx, org, project, buildID); err != nil {
-		slog.Warn("failed to clean up build artifacts before retry (continuing anyway)",
+		slog.Warn("artifact cleanup failed, falling back to fresh build",
 			"buildID", buildID, "error", err)
+		return b.queueFreshBuild(ctx, org, project, buildID, pr)
+	}
+
+	// Verify artifacts are actually gone before retrying.
+	remaining, err := b.listBuildArtifacts(ctx, org, project, buildID)
+	if err != nil {
+		slog.Warn("could not verify artifact cleanup, falling back to fresh build",
+			"buildID", buildID, "error", err)
+		return b.queueFreshBuild(ctx, org, project, buildID, pr)
+	}
+	if len(remaining) > 0 {
+		names := make([]string, len(remaining))
+		for i, a := range remaining {
+			names[i] = a.Name
+		}
+		slog.Warn("artifacts still present after deletion, falling back to fresh build",
+			"buildID", buildID, "remaining", names)
+		return b.queueFreshBuild(ctx, org, project, buildID, pr)
 	}
 
 	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true",
@@ -889,33 +909,20 @@ func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID s
 // deleteBuildArtifacts removes all existing artifacts from a build so that
 // a retry does not fail with "artifact already exists" errors.
 func (b *Backend) deleteBuildArtifacts(ctx context.Context, org, project, buildID string) error {
-	listPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts",
-		url.PathEscape(org), url.PathEscape(project), buildID)
-
-	resp, err := b.doRequest(ctx, http.MethodGet, listPath, nil)
+	artifacts, err := b.listBuildArtifacts(ctx, org, project, buildID)
 	if err != nil {
-		return fmt.Errorf("listing artifacts for build %s: %w", buildID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("listing artifacts for build %s returned status %d", buildID, resp.StatusCode)
+		return err
 	}
 
-	var artifacts adoArtifactList
-	if err := json.NewDecoder(resp.Body).Decode(&artifacts); err != nil {
-		return fmt.Errorf("decoding artifacts for build %s: %w", buildID, err)
-	}
-
-	if len(artifacts.Value) == 0 {
+	if len(artifacts) == 0 {
 		return nil
 	}
 
 	slog.Info("deleting build artifacts before retry",
-		"buildID", buildID, "count", len(artifacts.Value))
+		"buildID", buildID, "count", len(artifacts))
 
 	var errs []string
-	for _, a := range artifacts.Value {
+	for _, a := range artifacts {
 		delPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts?artifactName=%s",
 			url.PathEscape(org), url.PathEscape(project), buildID,
 			url.QueryEscape(a.Name))
@@ -934,6 +941,94 @@ func (b *Backend) deleteBuildArtifacts(ctx context.Context, org, project, buildI
 
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to delete some artifacts: %s", strings.Join(errs, "; "))
+	}
+	return nil
+}
+
+// listBuildArtifacts returns the current artifacts for a build.
+func (b *Backend) listBuildArtifacts(ctx context.Context, org, project, buildID string) ([]adoArtifact, error) {
+	listPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts",
+		url.PathEscape(org), url.PathEscape(project), buildID)
+
+	resp, err := b.doRequest(ctx, http.MethodGet, listPath, nil)
+	if err != nil {
+		return nil, fmt.Errorf("listing artifacts for build %s: %w", buildID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("listing artifacts for build %s returned status %d", buildID, resp.StatusCode)
+	}
+
+	var artifacts adoArtifactList
+	if err := json.NewDecoder(resp.Body).Decode(&artifacts); err != nil {
+		return nil, fmt.Errorf("decoding artifacts for build %s: %w", buildID, err)
+	}
+	return artifacts.Value, nil
+}
+
+// getBuildByID fetches a single build by its ID.
+func (b *Backend) getBuildByID(ctx context.Context, org, project, buildID string) (*adoBuild, error) {
+	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s",
+		url.PathEscape(org), url.PathEscape(project), buildID)
+
+	resp, err := b.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, fmt.Errorf("fetching build %s: %w", buildID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetching build %s returned status %d", buildID, resp.StatusCode)
+	}
+
+	var build adoBuild
+	if err := json.NewDecoder(resp.Body).Decode(&build); err != nil {
+		return nil, fmt.Errorf("decoding build %s: %w", buildID, err)
+	}
+	return &build, nil
+}
+
+// queueFreshBuild queues a brand-new build for the same pipeline definition
+// and source branch as the given build. This avoids "artifact already exists"
+// errors that occur when retrying an existing build in-place.
+func (b *Backend) queueFreshBuild(ctx context.Context, org, project, buildID string, pr *provider.PRInfo) error {
+	build, err := b.getBuildByID(ctx, org, project, buildID)
+	if err != nil {
+		return fmt.Errorf("cannot queue fresh build: %w", err)
+	}
+
+	if build.Definition.ID == 0 {
+		return fmt.Errorf("cannot queue fresh build: definition ID missing for build %s", buildID)
+	}
+
+	path := fmt.Sprintf("/%s/%s/_apis/build/builds",
+		url.PathEscape(org), url.PathEscape(project))
+
+	body := map[string]any{
+		"definition":   map[string]any{"id": build.Definition.ID},
+		"sourceBranch": build.SourceBranch,
+	}
+	if build.SourceVersion != "" {
+		body["sourceVersion"] = build.SourceVersion
+	}
+
+	resp, err := b.doRequest(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return fmt.Errorf("failed to queue fresh build for definition %d: %w", build.Definition.ID, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return fmt.Errorf("queue fresh build returned status %d: %w", resp.StatusCode, b.parseError(resp))
+	}
+
+	var newBuild adoBuild
+	if err := json.NewDecoder(resp.Body).Decode(&newBuild); err != nil {
+		slog.Warn("queued fresh build but could not decode response", "error", err)
+	} else {
+		slog.Info("fresh build queued as fallback",
+			"oldBuildID", buildID, "newBuildID", newBuild.ID, "prID", pr.ID)
 	}
 	return nil
 }

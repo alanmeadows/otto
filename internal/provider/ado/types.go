@@ -65,8 +65,10 @@ type adoBuild struct {
 	BuildNumber  string `json:"buildNumber"`
 	Status       string `json:"status"`
 	Result       string `json:"result"`
-	SourceBranch string `json:"sourceBranch"`
-	Definition   struct {
+	SourceBranch  string `json:"sourceBranch"`
+	SourceVersion string `json:"sourceVersion,omitempty"`
+	Definition    struct {
+		ID   int    `json:"id"`
 		Name string `json:"name"`
 	} `json:"definition"`
 	Links struct {

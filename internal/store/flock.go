@@ -3,6 +3,8 @@ package store
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/gofrs/flock"
@@ -14,6 +16,10 @@ const DefaultLockTimeout = 5 * time.Second
 // WithLock acquires an exclusive lock on path.lock, runs fn, then releases.
 func WithLock(path string, timeout time.Duration, fn func() error) error {
 	lockPath := path + ".lock"
+	// Ensure parent directory exists so the lock file can be created.
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return fmt.Errorf("creating lock directory: %w", err)
+	}
 	fileLock := flock.New(lockPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -34,6 +40,9 @@ func WithLock(path string, timeout time.Duration, fn func() error) error {
 // WithReadLock acquires a shared read lock on path.lock, runs fn, then releases.
 func WithReadLock(path string, timeout time.Duration, fn func() error) error {
 	lockPath := path + ".lock"
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return fmt.Errorf("creating lock directory: %w", err)
+	}
 	fileLock := flock.New(lockPath)
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)

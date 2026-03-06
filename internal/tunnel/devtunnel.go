@@ -18,6 +18,25 @@ var tunnelURLPattern = regexp.MustCompile(`https://[^\s]*\.devtunnels\.ms[^\s]*`
 
 const bgtaskTunnelName = "otto-tunnel"
 
+// devtunnelBin is the resolved binary name ("devtunnel" or "devtunnel.exe").
+// Resolved lazily by findDevtunnel().
+var devtunnelBin string
+
+// findDevtunnel locates the devtunnel binary, checking for both "devtunnel"
+// and "devtunnel.exe" (common on WSL where the Windows binary is in PATH).
+func findDevtunnel() string {
+	if devtunnelBin != "" {
+		return devtunnelBin
+	}
+	for _, name := range []string{"devtunnel", "devtunnel.exe"} {
+		if p, err := exec.LookPath(name); err == nil {
+			devtunnelBin = p
+			return p
+		}
+	}
+	return ""
+}
+
 // hasBgtask reports whether the bgtask binary is available in PATH.
 func hasBgtask() bool {
 	_, err := exec.LookPath("bgtask")
@@ -66,9 +85,9 @@ m.onStatusChange = fn
 }
 
 // IsInstalled reports whether the devtunnel binary is available in PATH.
+// Accepts both "devtunnel" and "devtunnel.exe" (WSL).
 func (m *Manager) IsInstalled() bool {
-_, err := exec.LookPath("devtunnel")
-return err == nil
+	return findDevtunnel() != ""
 }
 
 // UpdateConfig replaces the tunnel configuration. Takes effect on next Start().
@@ -80,7 +99,7 @@ m.config = cfg
 
 // IsLoggedIn checks whether the current user is logged in to devtunnel.
 func (m *Manager) IsLoggedIn() (bool, error) {
-cmd := exec.Command("devtunnel", "user", "show")
+cmd := exec.Command(findDevtunnel(), "user", "show")
 if err := cmd.Run(); err != nil {
 if exitErr, ok := err.(*exec.ExitError); ok {
 return false, fmt.Errorf("devtunnel user show exited with code %d", exitErr.ExitCode())
@@ -99,28 +118,28 @@ return nil
 }
 
 // Create tunnel (idempotent — fails silently if exists).
-runCmd("devtunnel", "create", tid)
+runCmd(findDevtunnel(), "create", tid)
 
 // Create port (idempotent).
-runCmd("devtunnel", "port", "create", tid, "-p", fmt.Sprintf("%d", port))
+runCmd(findDevtunnel(), "port", "create", tid, "-p", fmt.Sprintf("%d", port))
 
 // Reset access control to start fresh.
-runCmd("devtunnel", "access", "reset", tid)
+runCmd(findDevtunnel(), "access", "reset", tid)
 
 // Apply access rules.
 switch m.config.Access {
 case "anonymous":
-runCmd("devtunnel", "access", "create", tid, "--anonymous")
+runCmd(findDevtunnel(), "access", "create", tid, "--anonymous")
 slog.Info("tunnel access: anonymous")
 case "tenant":
-runCmd("devtunnel", "access", "create", tid, "--tenant")
+runCmd(findDevtunnel(), "access", "create", tid, "--tenant")
 slog.Info("tunnel access: Entra tenant")
 default:
 slog.Info("tunnel access: authenticated (owner only unless org specified)")
 }
 
 if m.config.AllowOrg != "" {
-runCmd("devtunnel", "access", "create", tid, "--org", m.config.AllowOrg)
+runCmd(findDevtunnel(), "access", "create", tid, "--org", m.config.AllowOrg)
 slog.Info("tunnel access: granted to GitHub org", "org", m.config.AllowOrg)
 }
 
@@ -193,7 +212,7 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 
 	// Start the tunnel via bgtask with auto-restart.
 	args := []string{"run", "--name", bgtaskTunnelName, "--restart", "always",
-		"--", "devtunnel", "host", m.config.TunnelID}
+		"--", findDevtunnel(), "host", m.config.TunnelID}
 	cmd := exec.Command("bgtask", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -337,7 +356,7 @@ func (m *Manager) isTunnelConnected() bool {
 	if tid == "" {
 		return false
 	}
-	cmd := exec.Command("devtunnel", "show", tid)
+	cmd := exec.Command(findDevtunnel(), "show", tid)
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -384,7 +403,7 @@ func (m *Manager) healthMonitor(ctx context.Context, port int) {
 			exec.Command("bgtask", "rm", bgtaskTunnelName).Run() //nolint:errcheck
 
 			args := []string{"run", "--name", bgtaskTunnelName, "--restart", "always",
-				"--", "devtunnel", "host", m.config.TunnelID}
+				"--", findDevtunnel(), "host", m.config.TunnelID}
 			cmd := exec.Command("bgtask", args...)
 			if err := cmd.Run(); err != nil {
 				slog.Error("failed to restart tunnel after health check failure", "error", err)

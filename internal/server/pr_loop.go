@@ -693,7 +693,7 @@ func isInfraFailure(diagnosis string) bool {
 	hasInfraRootCause := strings.Contains(upper, "INFRASTRUCTURE") &&
 		(strings.Contains(upper, "ROOT CAUSE") || strings.Contains(upper, "FAILURE SUMMARY") || strings.Contains(upper, "DIAGNOSIS"))
 	hasRetryAction := strings.Contains(upper, "RETRY") &&
-		(strings.Contains(upper, "RECOMMEND") || strings.Contains(upper, "ACTION"))
+		(strings.Contains(upper, "RECOMMEND") || strings.Contains(upper, "ACTION") || strings.Contains(upper, "RESOLVE"))
 	hasNoCodeChanges := strings.Contains(upper, "NO CODE CHANGES")
 
 	// Require infrastructure root cause PLUS a retry recommendation or "no code changes".

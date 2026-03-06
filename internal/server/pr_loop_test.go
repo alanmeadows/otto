@@ -175,6 +175,7 @@ func TestIsInfraFailure(t *testing.T) {
 		{"fallback infra without retry or no-code-changes", "## Root Cause\n\nInfrastructure issue detected.\n\n### Action\n\nInvestigate the agent pool.", false},
 		{"fallback retry without infra root cause", "## Summary\n\nTest failed.\n\n### Recommended Action\n\nRetry the build.", false},
 		{"fallback recommendation heading with retry", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe primary failure is consistent with a flaky or environment-dependent test infrastructure issue.\n\n### Recommendation\n\n**Retry the build.**", true},
+		{"fallback retry-resolve phrasing", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe failure points to a transient infrastructure issue in the Windows build container. **A retry is likely to resolve this.**", true},
 	}
 
 	for _, tt := range tests {

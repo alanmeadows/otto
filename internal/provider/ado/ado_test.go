@@ -693,42 +693,36 @@ func TestWorkflowAddressBot(t *testing.T) {
 	// This currently just logs; no error expected.
 }
 
-func TestRetryBuild_DeletesArtifactsFirst(t *testing.T) {
-	var artifactDeletedCollect, artifactDeletedCleanup, retryCalled bool
-	artifactListCalls := 0
+func TestRetryBuild_ArtifactsExist_QueuesFreshBuild(t *testing.T) {
+	var freshBuildQueued bool
+	var freshBuildBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			artifactListCalls++
-			if artifactListCalls == 1 {
-				// First call: list returns artifacts to delete.
-				json.NewEncoder(w).Encode(map[string]any{
-					"count": 2,
-					"value": []map[string]any{
-						{"id": 1, "name": "drop_windows_api_testing_collect_results"},
-						{"id": 2, "name": "drop_windows_api_testing_cleanup_propagator"},
-					},
-				})
-			} else {
-				// Second call: verification shows artifacts are gone.
-				json.NewEncoder(w).Encode(map[string]any{"count": 0, "value": []any{}})
-			}
+			// Build has existing artifacts.
+			json.NewEncoder(w).Encode(map[string]any{
+				"count": 2,
+				"value": []map[string]any{
+					{"id": 1, "name": "drop_windows_api_testing_collect_results"},
+					{"id": 2, "name": "drop_windows_api_testing_cleanup_propagator"},
+				},
+			})
 
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/artifacts"):
-			name := r.URL.Query().Get("artifactName")
-			switch name {
-			case "drop_windows_api_testing_collect_results":
-				artifactDeletedCollect = true
-			case "drop_windows_api_testing_cleanup_propagator":
-				artifactDeletedCleanup = true
-			}
-			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/builds/99999") && !strings.Contains(r.URL.Path, "/artifacts"):
+			// Return build details for fresh build.
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":            99999,
+				"sourceBranch":  "refs/pull/42/merge",
+				"sourceVersion": "abc123def456",
+				"definition":    map[string]any{"id": 10, "name": "Azlocal-Overlay-PullRequest"},
+			})
 
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/builds/99999") && r.URL.Query().Get("retry") == "true":
-			retryCalled = true
+		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/builds") && !strings.Contains(r.URL.Path, "/99999"):
+			freshBuildQueued = true
+			json.NewDecoder(r.Body).Decode(&freshBuildBody)
 			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{"id": 99999})
+			json.NewEncoder(w).Encode(map[string]any{"id": 100000})
 
 		default:
 			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
@@ -742,10 +736,8 @@ func TestRetryBuild_DeletesArtifactsFirst(t *testing.T) {
 	err := b.RetryBuild(context.Background(), pr, "99999")
 	require.NoError(t, err)
 
-	assert.Equal(t, 2, artifactListCalls, "should list artifacts twice (delete + verify)")
-	assert.True(t, artifactDeletedCollect, "should delete collect_results artifact")
-	assert.True(t, artifactDeletedCleanup, "should delete cleanup_propagator artifact")
-	assert.True(t, retryCalled, "should issue retry after verified artifact cleanup")
+	assert.True(t, freshBuildQueued, "should queue a fresh build when artifacts exist")
+	assert.Equal(t, "abc123def456", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
 }
 
 func TestRetryBuild_NoArtifacts(t *testing.T) {
@@ -775,7 +767,7 @@ func TestRetryBuild_NoArtifacts(t *testing.T) {
 	assert.True(t, retryCalled, "should still retry even with no artifacts")
 }
 
-func TestRetryBuild_ArtifactCleanupFailureFallsBackToFreshBuild(t *testing.T) {
+func TestRetryBuild_ArtifactListFailure_QueuesFreshBuild(t *testing.T) {
 	var freshBuildQueued bool
 	var freshBuildBody map[string]any
 
@@ -815,24 +807,20 @@ func TestRetryBuild_ArtifactCleanupFailureFallsBackToFreshBuild(t *testing.T) {
 	assert.Equal(t, "abc123def456", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
 }
 
-func TestRetryBuild_ArtifactsPersistAfterDelete_FallsBackToFreshBuild(t *testing.T) {
+func TestRetryBuild_SingleArtifact_QueuesFreshBuild(t *testing.T) {
 	var freshBuildQueued bool
 	var freshBuildBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			// Always return artifacts (simulates delete not actually working).
+			// Build has a single artifact.
 			json.NewEncoder(w).Encode(map[string]any{
 				"count": 1,
 				"value": []map[string]any{
 					{"id": 1, "name": "drop_windows_api_testing_collect_results"},
 				},
 			})
-
-		case r.Method == http.MethodDelete && strings.Contains(r.URL.Path, "/artifacts"):
-			// Delete "succeeds" (returns 204) but artifacts still appear in listing.
-			w.WriteHeader(http.StatusNoContent)
 
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/builds/300") && !strings.Contains(r.URL.Path, "/artifacts"):
 			json.NewEncoder(w).Encode(map[string]any{
@@ -859,6 +847,6 @@ func TestRetryBuild_ArtifactsPersistAfterDelete_FallsBackToFreshBuild(t *testing
 
 	err := b.RetryBuild(context.Background(), pr, "300")
 	require.NoError(t, err)
-	assert.True(t, freshBuildQueued, "should queue fresh build when artifacts persist after deletion")
+	assert.True(t, freshBuildQueued, "should queue fresh build when artifacts exist")
 	assert.Equal(t, "def789abc012", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
 }

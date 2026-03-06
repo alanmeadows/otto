@@ -858,34 +858,25 @@ func (b *Backend) resolveRepo(pr *provider.PRInfo) string {
 var _ provider.PRBackend = (*Backend)(nil)
 
 // RetryBuild retries a failed build by its ID using the ADO REST API.
-// It first deletes any existing artifacts from the build to prevent
-// "artifact already exists" errors on retry. If artifact cleanup cannot
-// be verified (artifacts still present after deletion), it falls back
-// to queuing a fresh build for the same pipeline definition and branch.
+// If the build has existing artifacts, it queues a fresh build instead
+// of retrying in-place, because in-place retries (PATCH ?retry=true)
+// are unreliable when artifacts exist — ADO can produce "artifact already
+// exists" errors even after successful artifact deletion.
 func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
 	org := b.resolveOrg(pr)
 	project := b.resolveProject(pr)
 
-	if err := b.deleteBuildArtifacts(ctx, org, project, buildID); err != nil {
-		slog.Warn("artifact cleanup failed, falling back to fresh build",
-			"buildID", buildID, "error", err)
-		return b.queueFreshBuild(ctx, org, project, buildID, pr)
-	}
-
-	// Verify artifacts are actually gone before retrying.
-	remaining, err := b.listBuildArtifacts(ctx, org, project, buildID)
+	// Check for existing artifacts. In-place retries are unreliable when
+	// artifacts exist, so queue a fresh build in that case.
+	artifacts, err := b.listBuildArtifacts(ctx, org, project, buildID)
 	if err != nil {
-		slog.Warn("could not verify artifact cleanup, falling back to fresh build",
+		slog.Warn("could not check build artifacts, falling back to fresh build",
 			"buildID", buildID, "error", err)
 		return b.queueFreshBuild(ctx, org, project, buildID, pr)
 	}
-	if len(remaining) > 0 {
-		names := make([]string, len(remaining))
-		for i, a := range remaining {
-			names[i] = a.Name
-		}
-		slog.Warn("artifacts still present after deletion, falling back to fresh build",
-			"buildID", buildID, "remaining", names)
+	if len(artifacts) > 0 {
+		slog.Info("build has existing artifacts, queuing fresh build instead of in-place retry",
+			"buildID", buildID, "artifactCount", len(artifacts))
 		return b.queueFreshBuild(ctx, org, project, buildID, pr)
 	}
 
@@ -903,45 +894,6 @@ func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID s
 	}
 
 	slog.Info("build retry queued", "buildID", buildID, "prID", pr.ID)
-	return nil
-}
-
-// deleteBuildArtifacts removes all existing artifacts from a build so that
-// a retry does not fail with "artifact already exists" errors.
-func (b *Backend) deleteBuildArtifacts(ctx context.Context, org, project, buildID string) error {
-	artifacts, err := b.listBuildArtifacts(ctx, org, project, buildID)
-	if err != nil {
-		return err
-	}
-
-	if len(artifacts) == 0 {
-		return nil
-	}
-
-	slog.Info("deleting build artifacts before retry",
-		"buildID", buildID, "count", len(artifacts))
-
-	var errs []string
-	for _, a := range artifacts {
-		delPath := fmt.Sprintf("/%s/%s/_apis/build/builds/%s/artifacts?artifactName=%s",
-			url.PathEscape(org), url.PathEscape(project), buildID,
-			url.QueryEscape(a.Name))
-
-		delResp, err := b.doRequest(ctx, http.MethodDelete, delPath, nil)
-		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", a.Name, err))
-			continue
-		}
-		delResp.Body.Close()
-
-		if delResp.StatusCode != http.StatusOK && delResp.StatusCode != http.StatusNoContent {
-			errs = append(errs, fmt.Sprintf("%s: status %d", a.Name, delResp.StatusCode))
-		}
-	}
-
-	if len(errs) > 0 {
-		return fmt.Errorf("failed to delete some artifacts: %s", strings.Join(errs, "; "))
-	}
 	return nil
 }
 

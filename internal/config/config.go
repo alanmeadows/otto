@@ -78,6 +78,7 @@ func mergeIntoConfig(cfg *Config, src map[string]any) error {
 	// Save runtime-only fields that are excluded from JSON.
 	dashEnabled := cfg.Dashboard.Enabled
 	tunnelEnabled := cfg.Dashboard.AutoStartTunnel
+	copilotServer := cfg.Dashboard.CopilotServer
 	noPRMon := cfg.Server.NoPRMonitoring
 
 	// Marshal current config to map
@@ -107,6 +108,7 @@ func mergeIntoConfig(cfg *Config, src map[string]any) error {
 	// Restore runtime-only fields.
 	cfg.Dashboard.Enabled = dashEnabled
 	cfg.Dashboard.AutoStartTunnel = tunnelEnabled
+	cfg.Dashboard.CopilotServer = copilotServer
 	cfg.Server.NoPRMonitoring = noPRMon
 	return nil
 }

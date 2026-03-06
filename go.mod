@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/coder/websocket v1.8.14
-	github.com/github/copilot-sdk/go v0.1.31-0.20260305230107-4e1499dd2370
+	github.com/github/copilot-sdk/go v0.1.30
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/gofrs/flock v0.13.0
 	github.com/google/go-github/v82 v82.0.0

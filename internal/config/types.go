@@ -109,7 +109,6 @@ func (s ServerConfig) ParsePollInterval() time.Duration {
 // runtime via --no-dashboard / --no-tunnel flags.
 type DashboardConfig struct {
 	Port            int      `json:"port"`
-	CopilotServer   string   `json:"copilot_server"`       // e.g. "localhost:4321" to connect to shared headless server
 	TunnelID        string   `json:"tunnel_id"`             // persistent tunnel name (e.g. "otto-dash"); empty = ephemeral
 	TunnelAccess    string   `json:"tunnel_access"`         // "anonymous", "tenant", or "authenticated" (default)
 	TunnelAllowOrg  string   `json:"tunnel_allow_org"`      // GitHub org to grant access (e.g. "my-org")
@@ -117,9 +116,10 @@ type DashboardConfig struct {
 	OwnerNickname   string   `json:"owner_nickname"`        // display name for session owner in chat bubbles (default: "owner")
 	AllowedUsers    []string `json:"allowed_users"`         // emails allowed full dashboard access (e.g. ["alice@microsoft.com"])
 
-	// Runtime-only fields (set by CLI flags, not persisted to config).
-	Enabled         bool `json:"-"` // controlled by --no-dashboard
-	AutoStartTunnel bool `json:"-"` // controlled by --no-tunnel
+	// Runtime-only fields (set by CLI flags or server startup, not persisted).
+	Enabled         bool   `json:"-"` // controlled by --no-dashboard
+	AutoStartTunnel bool   `json:"-"` // controlled by --no-tunnel
+	CopilotServer   string `json:"-"` // set at runtime by ensureCopilotServer()
 }
 
 // NotificationsConfig holds notification settings.

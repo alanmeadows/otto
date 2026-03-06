@@ -38,6 +38,15 @@ func TriggerPoll() {
 func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 	serverStartTime = time.Now()
 
+	// Start (or attach to) the managed copilot headless server.
+	copilotURL, err := ensureCopilotServer()
+	if err != nil {
+		slog.Error("failed to start copilot server", "error", err)
+		return fmt.Errorf("copilot server: %w", err)
+	}
+	// Set for downstream consumers.
+	cfg.Dashboard.CopilotServer = copilotURL
+
 	mux := http.NewServeMux()
 	registerRoutes(mux)
 
@@ -58,12 +67,7 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 		slog.Info("PR monitoring disabled via --no-pr-monitoring")
 	} else {
 		slog.Info("starting PR monitoring", "model", cfg.Models.Primary, "interval", cfg.PR.Providers)
-		var llmClient *llm.CopilotClient
-		if cfg.Dashboard.CopilotServer != "" {
-			llmClient = llm.NewCopilotClientWithServer(cfg.Models.Primary, cfg.Dashboard.CopilotServer)
-		} else {
-			llmClient = llm.NewCopilotClient(cfg.Models.Primary)
-		}
+		llmClient := llm.NewCopilotClientWithServer(cfg.Models.Primary, copilotURL)
 		if err := llmClient.Start(ctx); err != nil {
 			slog.Warn("Copilot LLM client not available, PR monitoring disabled", "error", err)
 		} else {

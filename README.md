@@ -284,7 +284,6 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 {
   // Dashboard & tunnel settings for this project
   "dashboard": {
-    "copilot_server": "localhost:4321",
     "tunnel_id": "myname-otto",
     "owner_nickname": "myname",
     "tunnel_access": "tenant"
@@ -319,7 +318,6 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `server.source_dir` | string | | Path to otto source for `upgrade --channel main` |
 | `server.upgrade_channel` | string | `release` | Upgrade channel: `release` (go install @latest) or `main` (build from source) |
 | `dashboard.port` | int | `4098` | Dashboard web server port |
-| `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
 | `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated) |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |

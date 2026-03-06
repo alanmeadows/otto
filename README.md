@@ -141,7 +141,7 @@ Open **http://localhost:4098** in your browser. The dashboard shows:
 - Real-time streaming of LLM responses and tool calls
 - Share individual sessions via time-limited read-only links
 
-The tunnel is managed via the CLI or config — the dashboard shows the tunnel status and URL when active, and links to the [setup guide](docs/tunnel.md) when inactive. Allowed users can be managed live from the dashboard sidebar.
+The tunnel is managed via bgtask so it survives otto restarts. Otto monitors the tunnel health every 2 minutes — if the relay connection drops (process alive but disconnected), otto automatically restarts the tunnel. The dashboard shows the tunnel status and URL when active, and links to the [setup guide](docs/tunnel.md) when inactive. Allowed users can be managed live from the dashboard sidebar.
 
 ## Copilot Dashboard
 

@@ -219,12 +219,18 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	}
 
 	// Auto-start tunnel if configured.
-	if s.cfg.Dashboard.AutoStartTunnel && s.tunnelMgr.IsInstalled() && tunnel.IsBgtaskInstalled() {
-		go func() {
-			if err := s.tunnelMgr.Start(ctx, port); err != nil {
-				slog.Warn("auto-start tunnel failed", "error", err)
-			}
-		}()
+	if s.cfg.Dashboard.AutoStartTunnel {
+		if !tunnel.IsBgtaskInstalled() {
+			slog.Warn("tunnel skipped: bgtask is not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+		} else if !s.tunnelMgr.IsInstalled() {
+			slog.Warn("tunnel skipped: devtunnel is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+		} else {
+			go func() {
+				if err := s.tunnelMgr.Start(ctx, port); err != nil {
+					slog.Warn("auto-start tunnel failed", "error", err)
+				}
+			}()
+		}
 	}
 
 	// Poll ~/.copilot/session-state/ for changes and push updates to clients.

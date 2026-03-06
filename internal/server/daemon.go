@@ -18,6 +18,7 @@ import (
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/store"
+	"github.com/alanmeadows/otto/internal/tunnel"
 )
 
 // PIDFilePath returns the path to the daemon PID file.
@@ -195,7 +196,11 @@ func (r *forkResult) printStatus() {
 
 	// If tunnel is enabled, poll the dashboard API for the tunnel URL.
 	if r.dashboardEnabled && r.tunnelEnabled {
-		if tunnelURL := pollTunnelURL(r.dashPort); tunnelURL != "" {
+		if !tunnel.IsBgtaskInstalled() {
+			fmt.Printf("tunnel: skipped (bgtask not installed — go install github.com/philsphicas/bgtask/cmd/bgtask@latest)\n")
+		} else if !(&tunnel.Manager{}).IsInstalled() {
+			fmt.Printf("tunnel: skipped (devtunnel not installed — curl -sL https://aka.ms/DevTunnelCliInstall | bash)\n")
+		} else if tunnelURL := pollTunnelURL(r.dashPort); tunnelURL != "" {
 			fmt.Printf("tunnel: %s\n", tunnelURL)
 		} else {
 			fmt.Printf("tunnel: starting (check 'otto server logs' if it doesn't come up)\n")

@@ -162,10 +162,12 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 	m.mu.Unlock()
 
 	if !hasBgtask() {
-		return fmt.Errorf("bgtask is required but not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+		slog.Warn("tunnel skipped: bgtask is not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+		return nil
 	}
 	if !m.IsInstalled() {
-		return fmt.Errorf("devtunnel is required but not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash")
+		slog.Warn("tunnel skipped: devtunnel is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+		return nil
 	}
 	if m.config.TunnelID == "" {
 		// Auto-create a persistent tunnel if access control is configured.

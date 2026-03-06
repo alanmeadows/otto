@@ -145,6 +145,22 @@ The tunnel is managed via bgtask so it survives otto restarts. Otto monitors the
 
 The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
 
+### Copilot Server
+
+Otto automatically starts and manages a headless Copilot server via bgtask on port 4321. This server handles all LLM interactions for both the dashboard and PR monitoring. It uses `--no-auto-update` to avoid corrupting `~/.copilot/pkg/` while other CLI sessions are running.
+
+To manage your own server instead (e.g. on a different port or with custom flags):
+
+```bash
+# Start your own headless server
+copilot --headless --port 5000 --no-auto-update --log-level info &
+
+# Point otto at it
+otto config set dashboard.copilot_server localhost:5000
+```
+
+When `dashboard.copilot_server` is set, otto skips starting its own server and connects to yours.
+
 ### Starting sessions in a repo context
 
 When you create a new session from the dashboard, you can choose a working directory from a dropdown. This dropdown is populated from your tracked repositories — so the Copilot agent starts in the right repo with access to all its files.

@@ -746,6 +746,42 @@ function prWaitingOn(pr) {
     return parts.length > 0 ? parts.join(', ') : '';
 }
 
+function addPRFromDashboard() {
+    var prURL = prompt('PR URL (GitHub or Azure DevOps):');
+    if (!prURL) return;
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/prs' + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: prURL }),
+    })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        return r.json();
+    })
+    .then(pr => {
+        fetchPRs();
+        if (pr && pr.id) selectPR(pr.id);
+    })
+    .catch(err => alert('Failed to add PR: ' + err.message));
+}
+
+function removePR(id) {
+    if (!confirm('Stop tracking PR #' + id + '?')) return;
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/prs/' + encodeURIComponent(id) + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, { method: 'DELETE' })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        state.selectedPR = null;
+        document.getElementById('pr-detail-view').classList.add('hidden');
+        document.getElementById('empty-state').classList.remove('hidden');
+        fetchPRs();
+    })
+    .catch(err => alert('Failed to remove PR: ' + err.message));
+}
+
 // --- Repositories ---
 
 function fetchRepos() {
@@ -1469,6 +1505,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Repo management
     document.getElementById('add-repo-btn').addEventListener('click', showAddRepoDialog);
+
+    // PR management
+    document.getElementById('add-pr-btn').addEventListener('click', addPRFromDashboard);
+    document.getElementById('pr-remove-btn').addEventListener('click', () => {
+        if (state.selectedPR) removePR(state.selectedPR);
+    });
     document.getElementById('repo-remove-btn').addEventListener('click', () => {
         if (state.selectedRepo) removeRepo(state.selectedRepo);
     });

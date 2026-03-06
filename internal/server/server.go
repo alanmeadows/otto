@@ -5,13 +5,19 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
+	"os/exec"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/dashboard"
 	"github.com/alanmeadows/otto/internal/llm"
+	"github.com/alanmeadows/otto/internal/provider"
+	"github.com/alanmeadows/otto/internal/provider/ado"
+	ghbackend "github.com/alanmeadows/otto/internal/provider/github"
 )
 
 // pollTrigger is a channel that signals the monitor loop to run an immediate
@@ -81,6 +87,10 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 			dashSrv := dashboard.NewServer(cfg)
 			dashSrv.ListPRsFn = func() (any, error) { return ListPRs() }
 			dashSrv.GetPRFn = func(id string) (any, error) { return FindPRDetail(id) }
+			dashSrv.AddPRFn = func(ctx context.Context, prURL string) (any, error) {
+				return addPRByURL(ctx, prURL, cfg)
+			}
+			dashSrv.RemovePRFn = func(id string) error { return RemovePR(id) }
 			dashSrv.SetRestartHandler(func() error { return RestartDaemon() })
 			dashSrv.SetUpgradeHandler(func() error {
 				return UpgradeDaemon(cfg.Server.UpgradeChannel, cfg.Server.SourceDir)
@@ -116,6 +126,88 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 
 // serverStartTime records when the server started for uptime calculation.
 var serverStartTime time.Time
+
+// addPRByURL detects the provider from a PR URL, fetches metadata, and saves it.
+func addPRByURL(ctx context.Context, prURL string, cfg *config.Config) (any, error) {
+	reg := buildRegistryFromConfig(cfg)
+
+	backend, err := reg.Detect(prURL)
+	if err != nil {
+		return nil, fmt.Errorf("detecting provider: %w", err)
+	}
+
+	prInfo, err := backend.GetPR(ctx, prURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetching PR: %w", err)
+	}
+
+	maxAttempts := cfg.PR.MaxFixAttempts
+	if maxAttempts <= 0 {
+		maxAttempts = 5
+	}
+
+	pr := &PRDocument{
+		ID:             prInfo.ID,
+		Title:          prInfo.Title,
+		Provider:       backend.Name(),
+		Repo:           prInfo.RepoID,
+		Branch:         prInfo.SourceBranch,
+		Target:         prInfo.TargetBranch,
+		Status:         "watching",
+		URL:            prInfo.URL,
+		Created:        time.Now().UTC().Format(time.RFC3339),
+		LastChecked:    time.Now().UTC().Format(time.RFC3339),
+		MaxFixAttempts: maxAttempts,
+		Body:           fmt.Sprintf("# %s\n\n%s\n", prInfo.Title, prInfo.Description),
+	}
+
+	if err := SavePR(pr); err != nil {
+		return nil, fmt.Errorf("saving PR: %w", err)
+	}
+
+	slog.Info("PR tracked via dashboard", "id", pr.ID, "provider", pr.Provider, "title", pr.Title)
+	return pr, nil
+}
+
+// buildRegistryFromConfig creates a provider registry from config (server-side).
+func buildRegistryFromConfig(cfg *config.Config) *provider.Registry {
+	reg := provider.NewRegistry()
+
+	if cfg.PR.Providers != nil {
+		if adoCfg, ok := cfg.PR.Providers["ado"]; ok {
+			auth := ado.NewAuthProvider(adoCfg.PAT)
+			adoBackend := ado.NewBackend(adoCfg.Organization, adoCfg.Project, auth)
+			reg.Register(adoBackend)
+		}
+		if ghCfg, ok := cfg.PR.Providers["github"]; ok {
+			ghBack := ghbackend.NewBackend("", "", ghCfg.Token)
+			reg.Register(ghBack)
+		}
+	}
+
+	// Fallback: GitHub via GITHUB_TOKEN or gh CLI.
+	if !reg.HasBackendFor("github.com") {
+		token := os.Getenv("GITHUB_TOKEN")
+		if token == "" {
+			if out, err := exec.Command("gh", "auth", "token").Output(); err == nil {
+				token = strings.TrimSpace(string(out))
+			}
+		}
+		ghBack := ghbackend.NewBackend("", "", token)
+		reg.Register(ghBack)
+	}
+
+	return reg
+}
+
+// RemovePR finds a PR by ID and deletes it.
+func RemovePR(id string) error {
+	pr, err := FindPR(id)
+	if err != nil {
+		return err
+	}
+	return DeletePR(pr.Provider, pr.ID)
+}
 
 func registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /status", handleStatus)

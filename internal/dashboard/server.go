@@ -32,6 +32,8 @@ type Server struct {
 	tokenMu      sync.RWMutex
 	ListPRsFn    func() (any, error)
 	GetPRFn      func(id string) (any, error)
+	AddPRFn      func(ctx context.Context, url string) (any, error)
+	RemovePRFn   func(id string) error
 	dashboardKey string // secret key for dashboard access
 }
 
@@ -275,6 +277,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/worktrees", s.guardDashboard(s.handleListWorktrees))
 	mux.HandleFunc("GET /api/prs", s.guardDashboard(s.handleListPRs))
 	mux.HandleFunc("GET /api/prs/{id}", s.guardDashboard(s.handleGetPR))
+	mux.HandleFunc("POST /api/prs", s.guardDashboard(s.handleAddPR))
+	mux.HandleFunc("DELETE /api/prs/{id}", s.guardDashboard(s.handleRemovePR))
 	mux.HandleFunc("GET /api/repos", s.guardDashboard(s.handleListRepos))
 	mux.HandleFunc("POST /api/repos", s.guardDashboard(s.handleAddRepo))
 	mux.HandleFunc("DELETE /api/repos/{name}", s.guardDashboard(s.handleRemoveRepo))
@@ -382,6 +386,46 @@ func (s *Server) handleGetPR(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, pr)
+}
+
+func (s *Server) handleAddPR(w http.ResponseWriter, r *http.Request) {
+	if s.AddPRFn == nil {
+		http.Error(w, "not configured", http.StatusNotImplemented)
+		return
+	}
+	var req struct {
+		URL string `json:"url"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.URL == "" {
+		http.Error(w, "url is required", http.StatusBadRequest)
+		return
+	}
+	result, err := s.AddPRFn(r.Context(), req.URL)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	slog.Info("PR added via dashboard", "url", req.URL)
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, result)
+}
+
+func (s *Server) handleRemovePR(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if s.RemovePRFn == nil {
+		http.Error(w, "not configured", http.StatusNotImplemented)
+		return
+	}
+	if err := s.RemovePRFn(id); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+	slog.Info("PR removed via dashboard", "id", id)
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {

@@ -43,6 +43,7 @@
                 <div class="sidebar-section">
                     <div class="sidebar-header">
                         <h2>Tracked PRs</h2>
+                        <button id="add-pr-btn" class="icon-btn" title="Track a PR">+</button>
                     </div>
                     <div id="pr-list">
                         <div class="empty-hint" style="color:var(--text-muted);font-size:0.85em;padding:0.3em 0.5em">Loading…</div>
@@ -119,6 +120,7 @@
                             <span id="pr-detail-icon" class="pr-status-icon"></span>
                             <h3 id="pr-detail-title"></h3>
                             <a id="pr-detail-link" href="#" target="_blank" rel="noopener" class="btn btn-sm">View PR ↗</a>
+                            <button id="pr-remove-btn" class="btn btn-sm btn-danger" title="Stop tracking">Remove</button>
                         </div>
                         <div id="pr-detail-branches" class="pr-detail-branches"></div>
                         <div id="pr-detail-meta" class="pr-detail-meta"></div>

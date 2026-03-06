@@ -223,6 +223,19 @@ func PollTunnelURLQuick(dashPort int) string {
 	return status.URL
 }
 
+// PollTunnelURLBrief retries the tunnel status check for up to ~10 seconds.
+// Used by `server status` when the daemon just started and the tunnel may
+// still be connecting.
+func PollTunnelURLBrief(dashPort int) string {
+	for i := 0; i < 10; i++ {
+		if url := PollTunnelURLQuick(dashPort); url != "" {
+			return url
+		}
+		time.Sleep(1 * time.Second)
+	}
+	return ""
+}
+
 // pollTunnelURL polls the dashboard's tunnel status API until the tunnel URL
 // is available or the timeout expires. Localhost requests bypass dashboard auth.
 func pollTunnelURL(dashPort int) string {

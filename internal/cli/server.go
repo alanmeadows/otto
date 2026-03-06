@@ -3,6 +3,7 @@ package cli
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/server"
@@ -205,8 +206,16 @@ Displays the PID, uptime, endpoints, and tunnel URL when active.`,
 		if cfg.Dashboard.Enabled {
 			fmt.Fprintf(cmd.OutOrStdout(), "  dashboard: http://localhost:%d\n", dashPort)
 
-			// Query the dashboard for tunnel status.
-			if tunnelURL := server.PollTunnelURLQuick(dashPort); tunnelURL != "" {
+			// Query the dashboard for tunnel status. If the server just
+			// started (< 20s uptime), retry a few times since the tunnel
+			// needs time to connect.
+			var tunnelURL string
+			if uptime < 20*time.Second {
+				tunnelURL = server.PollTunnelURLBrief(dashPort)
+			} else {
+				tunnelURL = server.PollTunnelURLQuick(dashPort)
+			}
+			if tunnelURL != "" {
 				fmt.Fprintf(cmd.OutOrStdout(), "  tunnel:    %s\n", tunnelURL)
 			}
 		}

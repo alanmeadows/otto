@@ -143,6 +143,12 @@ func (m *Manager) CreateSession(ctx context.Context, name, model, workingDir str
 	// Load MCP servers from ~/.copilot/mcp-config.json for CLI parity.
 	if mcpServers := loadMCPConfig(); mcpServers != nil {
 		cfg.MCPServers = mcpServers
+		if m.serverURL != "" {
+			slog.Warn("MCP servers configured but using shared copilot server. MCP may not work unless the shared server is recent. Remove dashboard.copilot_server to use embedded mode.", "server", m.serverURL, "mcp_count", len(mcpServers))
+		}
+		for name := range mcpServers {
+			slog.Info("configuring MCP server for session", "server", name)
+		}
 	}
 
 	sdkSession, err := m.client.CreateSession(ctx, cfg)

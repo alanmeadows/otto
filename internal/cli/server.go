@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -172,8 +173,7 @@ var serverStatusCmd = &cobra.Command{
 	Short: "Show daemon status",
 	Long: `Show whether the otto daemon is running.
 
-Displays the PID and uptime if the daemon is active, or reports
-that it is not running.`,
+Displays the PID, uptime, endpoints, and tunnel URL when active.`,
 	Example: `  otto server status`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		running, pid, uptime, err := server.DaemonStatus()
@@ -181,11 +181,38 @@ that it is not running.`,
 			return err
 		}
 
-		if running {
-			fmt.Fprintf(cmd.OutOrStdout(), "daemon is running (PID %d, uptime %s)\n", pid, uptime.Round(1*1e9))
-		} else {
+		if !running {
 			fmt.Fprintln(cmd.OutOrStdout(), "daemon is not running")
+			return nil
 		}
+
+		fmt.Fprintf(cmd.OutOrStdout(), "daemon is running (PID %d, uptime %s)\n", pid, uptime.Round(1*1e9))
+
+		// Load config to determine ports.
+		cfg, cfgErr := config.Load()
+		if cfgErr != nil {
+			return nil // still show basic status even if config fails
+		}
+
+		apiPort := cfg.Server.Port
+		if apiPort == 0 {
+			apiPort = 4097
+		}
+		fmt.Fprintf(cmd.OutOrStdout(), "  api:       http://localhost:%d\n", apiPort)
+
+		dashPort := cfg.Dashboard.Port
+		if dashPort == 0 {
+			dashPort = 4098
+		}
+		if cfg.Dashboard.Enabled || cfg.Dashboard.CopilotServer != "" || cfg.Dashboard.TunnelID != "" {
+			fmt.Fprintf(cmd.OutOrStdout(), "  dashboard: http://localhost:%d\n", dashPort)
+
+			// Query the dashboard for tunnel status.
+			if tunnelURL := server.PollTunnelURLQuick(dashPort); tunnelURL != "" {
+				fmt.Fprintf(cmd.OutOrStdout(), "  tunnel:    %s\n", tunnelURL)
+			}
+		}
+
 		return nil
 	},
 }

@@ -203,6 +203,33 @@ func (r *forkResult) printStatus() {
 	}
 }
 
+// PollTunnelURLQuick does a single quick check for the tunnel URL.
+// Returns empty string if the tunnel isn't running or the dashboard
+// doesn't respond within 2 seconds.
+func PollTunnelURLQuick(dashPort int) string {
+	client := &http.Client{Timeout: 2 * time.Second}
+	url := fmt.Sprintf("http://localhost:%d/api/tunnel/status", dashPort)
+
+	resp, err := client.Get(url)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	var status struct {
+		Running  bool   `json:"running"`
+		URL      string `json:"url"`
+		KeyedURL string `json:"keyed_url"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return ""
+	}
+	if status.KeyedURL != "" {
+		return status.KeyedURL
+	}
+	return status.URL
+}
+
 // pollTunnelURL polls the dashboard's tunnel status API until the tunnel URL
 // is available or the timeout expires. Localhost requests bypass dashboard auth.
 func pollTunnelURL(dashPort int) string {

@@ -705,8 +705,9 @@ func isInfraFailure(diagnosis string) bool {
 	return false
 }
 
-// gitCommitAndPush stages all changes, commits, and pushes to the given branch.
-func gitCommitAndPush(ctx context.Context, workDir, branch, message string) (string, error) {
+// gitCommit stages all changes and commits locally without pushing.
+// Returns the short commit hash or an error if there are no changes.
+func gitCommit(ctx context.Context, workDir, message string) (string, error) {
 	// Check for changes.
 	statusCmd := exec.CommandContext(ctx, "git", "status", "--porcelain")
 	statusCmd.Dir = workDir
@@ -739,20 +740,31 @@ func gitCommitAndPush(ctx context.Context, workDir, branch, message string) (str
 	if err != nil {
 		return "", fmt.Errorf("git rev-parse: %w", err)
 	}
-	hash := strings.TrimSpace(string(hashOut))
+	return strings.TrimSpace(string(hashOut))[:8], nil
+}
 
-	// Push with explicit refspec so it works regardless of HEAD state
-	// (on-branch or detached). Strip refs/heads/ for the local side but
-	// keep it for the remote destination.
+// gitPush pushes local commits to the remote branch.
+func gitPush(ctx context.Context, workDir, branch string) error {
 	shortBranch := strings.TrimPrefix(branch, "refs/heads/")
 	refspec := fmt.Sprintf("HEAD:refs/heads/%s", shortBranch)
 	pushCmd := exec.CommandContext(ctx, "git", "push", "origin", refspec)
 	pushCmd.Dir = workDir
 	if out, err := pushCmd.CombinedOutput(); err != nil {
-		return "", fmt.Errorf("git push: %s: %w", string(out), err)
+		return fmt.Errorf("git push: %s: %w", string(out), err)
 	}
+	return nil
+}
 
-	return hash[:8], nil
+// gitCommitAndPush stages all changes, commits, and pushes to the given branch.
+func gitCommitAndPush(ctx context.Context, workDir, branch, message string) (string, error) {
+	hash, err := gitCommit(ctx, workDir, message)
+	if err != nil {
+		return "", err
+	}
+	if err := gitPush(ctx, workDir, branch); err != nil {
+		return "", err
+	}
+	return hash, nil
 }
 
 // RunMonitorLoop runs the PR monitoring loop that polls for PR status changes.
@@ -1015,47 +1027,119 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, c
 		}
 	}
 
-	// 2. Check for new comments.
+	// 2. Check for new comments and 3. MerlinBot — share a single worktree
+	// and batch all commits into one push to avoid triggering N pipeline runs.
 	newCommentCount := 0
 	unresolvedCount := 0
+	needsPush := false // tracks whether any stage committed changes
 	comments, err := backend.GetComments(ctx, prInfo)
 	if err != nil {
 		if errors.Is(err, ado.ErrAuthExpired) {
 			return err
 		}
 		slog.Warn("failed to get comments", "prID", pr.ID, "error", err)
-	} else {
+	}
+
+	// Determine if we need a worktree for comment/MerlinBot work.
+	hasNewComments := false
+	needsMerlinBot := false
+	if comments != nil {
 		seenSet := make(map[string]bool)
 		for _, id := range pr.SeenCommentIDs {
 			seenSet[id] = true
 		}
-
 		for _, comment := range comments {
-			// Skip MerlinBot-authored comments — tracked via MerlinBotDone in section 3.
-			if isMerlinBotAuthor(comment.Author) {
-				continue
-			}
-			// Skip system-generated comments (auto-complete, reviewer updates, ref changes, etc.).
-			if comment.CommentType == "system" {
+			if isMerlinBotAuthor(comment.Author) || comment.CommentType == "system" {
 				continue
 			}
 			if !comment.IsResolved {
 				unresolvedCount++
 			}
-			// Use composite key (threadID:commentID) since comment IDs are only unique within a thread.
 			commentKey := fmt.Sprintf("%s:%s", comment.ThreadID, comment.ID)
-			if seenSet[commentKey] || comment.IsResolved {
-				continue
+			if !seenSet[commentKey] && !comment.IsResolved {
+				hasNewComments = true
 			}
-
-			slog.Info("processing new comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
-			if err := evaluateComment(ctx, pr, comment, backend, client, cfg); err != nil {
-				slog.Error("failed to evaluate comment", "prID", pr.ID, "commentID", comment.ID, "error", err)
-			}
-			newCommentCount++
 		}
+	}
+	if !pr.MerlinBotDone {
+		if pr.Provider == "ado" {
+			if adoCfg, ok := cfg.PR.Providers["ado"]; ok && adoCfg.MerlinBot && comments != nil {
+				needsMerlinBot = true
+			}
+		}
+	}
 
-		// Track feedback resolution state.
+	// Create ONE shared worktree for both comment responses and MerlinBot.
+	if hasNewComments || needsMerlinBot {
+		workDir, mergeBack, cleanup, wdErr := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
+		if wdErr != nil {
+			slog.Error("failed to create shared worktree for comment/MerlinBot processing", "prID", pr.ID, "error", wdErr)
+		} else {
+			defer cleanup()
+
+			// 2a. Process new comments in the shared worktree.
+			if hasNewComments {
+				seenSet := make(map[string]bool)
+				for _, id := range pr.SeenCommentIDs {
+					seenSet[id] = true
+				}
+				for _, comment := range comments {
+					if isMerlinBotAuthor(comment.Author) || comment.CommentType == "system" {
+						continue
+					}
+					commentKey := fmt.Sprintf("%s:%s", comment.ThreadID, comment.ID)
+					if seenSet[commentKey] || comment.IsResolved {
+						continue
+					}
+
+					slog.Info("processing new comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
+					committed, evalErr := evaluateComment(ctx, pr, comment, backend, client, cfg, workDir)
+					if evalErr != nil {
+						slog.Error("failed to evaluate comment", "prID", pr.ID, "commentID", comment.ID, "error", evalErr)
+					}
+					if committed {
+						needsPush = true
+					}
+					newCommentCount++
+				}
+			}
+
+			// 3. MerlinBot handling in the same shared worktree.
+			if needsMerlinBot {
+				committed, mbErr := handleMerlinBotDaemon(ctx, pr, comments, backend, client, cfg, workDir)
+				if mbErr != nil {
+					slog.Warn("MerlinBot handling failed", "prID", pr.ID, "error", mbErr)
+				}
+				if committed {
+					needsPush = true
+				}
+			}
+
+			// Single consolidated push for all comment + MerlinBot commits.
+			if needsPush {
+				if pushErr := gitPush(ctx, workDir, pr.Branch); pushErr != nil {
+					slog.Error("failed to push batched comment/MerlinBot fixes", "prID", pr.ID, "error", pushErr)
+				} else {
+					slog.Info("pushed batched comment/MerlinBot fixes", "prID", pr.ID)
+					if mbErr := mergeBack(); mbErr != nil {
+						slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", mbErr)
+					}
+				}
+			}
+		}
+	}
+
+	// Track feedback resolution state (also handles the case where no worktree was needed).
+	if !pr.MerlinBotDone && !needsMerlinBot {
+		if pr.Provider != "ado" {
+			pr.MerlinBotDone = true
+		} else if adoCfg, ok := cfg.PR.Providers["ado"]; !ok || !adoCfg.MerlinBot {
+			pr.MerlinBotDone = true
+			slog.Debug("MerlinBot not configured, marking done", "prID", pr.ID)
+		}
+	}
+
+	if comments != nil {
 		pr.FeedbackDone = unresolvedCount == 0
 		slog.Info("comment status", "prID", pr.ID, "new", newCommentCount, "unresolved", unresolvedCount, "feedbackDone", pr.FeedbackDone)
 
@@ -1069,20 +1153,6 @@ func pollSinglePR(ctx context.Context, pr *PRDocument, reg *provider.Registry, c
 		reloaded.FeedbackDone = pr.FeedbackDone
 		reloaded.PipelineState = pr.PipelineState
 		pr = reloaded
-	}
-
-	// 3. MerlinBot handling — detect presence, evaluate, and resolve.
-	if !pr.MerlinBotDone {
-		if pr.Provider != "ado" {
-			pr.MerlinBotDone = true
-		} else if adoCfg, ok := cfg.PR.Providers["ado"]; !ok || !adoCfg.MerlinBot {
-			pr.MerlinBotDone = true
-			slog.Debug("MerlinBot not configured, marking done", "prID", pr.ID)
-		} else if comments != nil {
-			if err := handleMerlinBotDaemon(ctx, pr, comments, backend, client, cfg); err != nil {
-				slog.Warn("MerlinBot handling failed", "prID", pr.ID, "error", err)
-			}
-		}
 	}
 
 	// 4. Notify if comments were handled.
@@ -1170,7 +1240,9 @@ func parseMerlinBotEvaluation(content string) []merlinBotEvaluation {
 // handleMerlinBotDaemon processes MerlinBot comments on an ADO PR.
 // It detects "no AI feedback", evaluates real feedback via LLM, and resolves threads.
 // Sets pr.MerlinBotDone = true when MerlinBot has been fully handled.
-func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config) error {
+// When workDir is provided, it reuses that worktree and commits without pushing
+// (caller is responsible for pushing). Returns true if code changes were committed.
+func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config, workDir string) (bool, error) {
 	prInfo := &provider.PRInfo{
 		ID:           pr.ID,
 		URL:          pr.URL,
@@ -1193,7 +1265,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 			authors = append(authors, a)
 		}
 		slog.Info("no MerlinBot comments found yet", "prID", pr.ID, "totalComments", len(comments), "authors", strings.Join(authors, ", "))
-		return nil
+		return false, nil
 	}
 
 	slog.Info("found MerlinBot comments", "prID", pr.ID, "count", len(allBotComments))
@@ -1211,7 +1283,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 				}
 			}
 			pr.MerlinBotDone = true
-			return nil
+			return false, nil
 		}
 	}
 
@@ -1226,17 +1298,11 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 	if len(unresolvedBot) == 0 {
 		slog.Info("all MerlinBot comments already resolved", "prID", pr.ID)
 		pr.MerlinBotDone = true
-		return nil
+		return false, nil
 	}
 
 	// Evaluate unresolved MerlinBot comments via LLM.
 	slog.Info("evaluating MerlinBot comments via LLM", "prID", pr.ID, "count", len(unresolvedBot))
-
-	workDir, mergeBack, cleanup, err := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
-	if err != nil {
-		return fmt.Errorf("mapping PR to clean workdir: %w", err)
-	}
-	defer cleanup()
 
 	// Build comment summary for the prompt.
 	var commentSummary strings.Builder
@@ -1249,18 +1315,18 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 	}
 	prompt, err := prompts.Execute("merlinbot-evaluate.md", templateData)
 	if err != nil {
-		return fmt.Errorf("building MerlinBot evaluation prompt: %w", err)
+		return false, fmt.Errorf("building MerlinBot evaluation prompt: %w", err)
 	}
 
 	session, err := client.CreateSession(ctx, fmt.Sprintf("MerlinBot PR#%s", pr.ID), workDir)
 	if err != nil {
-		return fmt.Errorf("creating MerlinBot session: %w", err)
+		return false, fmt.Errorf("creating MerlinBot session: %w", err)
 	}
 	defer client.DeleteSession(ctx, session.ID)
 
 	resp, err := client.SendPrompt(ctx, session.ID, prompt)
 	if err != nil {
-		return fmt.Errorf("MerlinBot evaluation failed: %w", err)
+		return false, fmt.Errorf("MerlinBot evaluation failed: %w", err)
 	}
 
 	// Parse evaluations and take action.
@@ -1302,22 +1368,20 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 		}
 	}
 
-	// Commit and push if fixes were applied.
+	// Commit if fixes were applied (push is batched by the caller).
+	committed := false
 	if fixCount > 0 {
 		commitMsg := fmt.Sprintf("address %d MerlinBot comment(s)", fixCount)
-		commitHash, err := gitCommitAndPush(ctx, workDir, pr.Branch, commitMsg)
+		commitHash, err := gitCommit(ctx, workDir, commitMsg)
 		if err != nil {
 			slog.Warn("failed to commit MerlinBot fixes", "prID", pr.ID, "error", err)
 		} else {
+			committed = true
 			slog.Info("committed MerlinBot fixes", "prID", pr.ID, "commit", commitHash, "fixCount", fixCount)
-			// Merge pushed changes back to the user's local worktree (best effort).
-			if mbErr := mergeBack(); mbErr != nil {
-				slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", mbErr)
-			}
 		}
 	}
 
 	pr.MerlinBotDone = true
 	slog.Info("MerlinBot handling complete", "prID", pr.ID, "evaluated", len(evaluations), "fixed", fixCount)
-	return nil
+	return committed, nil
 }

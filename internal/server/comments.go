@@ -13,7 +13,6 @@ import (
 	"github.com/alanmeadows/otto/internal/llm"
 	"github.com/alanmeadows/otto/internal/prompts"
 	"github.com/alanmeadows/otto/internal/provider"
-	"github.com/alanmeadows/otto/internal/repo"
 )
 
 // CommentResponse represents the LLM's evaluation of a PR comment.
@@ -24,16 +23,11 @@ type CommentResponse struct {
 }
 
 // evaluateComment processes a new review comment on a tracked PR.
-// It creates an LLM session, evaluates the comment, and takes appropriate action.
-func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config) error {
+// It creates an LLM session in the provided workDir, evaluates the comment,
+// and takes appropriate action. Returns true if code changes were committed
+// (caller is responsible for pushing).
+func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comment, backend provider.PRBackend, client llm.Client, cfg *config.Config, workDir string) (bool, error) {
 	slog.Info("evaluating comment", "prID", pr.ID, "commentID", comment.ID, "author", comment.Author)
-
-	// Create a clean temporary worktree for the fix.
-	workDir, mergeBack, cleanup, err := repo.MapPRToCleanWorkDir(cfg, pr.URL, pr.Branch)
-	if err != nil {
-		return fmt.Errorf("mapping PR to clean workdir: %w", err)
-	}
-	defer cleanup()
 
 	// Read code context around the commented line.
 	codeContext := readCodeContext(workDir, comment.FilePath, comment.Line, 10)
@@ -51,19 +45,19 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 
 	prompt, err := prompts.Execute("pr-comment-respond.md", templateData)
 	if err != nil {
-		return fmt.Errorf("building comment response prompt: %w", err)
+		return false, fmt.Errorf("building comment response prompt: %w", err)
 	}
 
 	// Create session and send prompt.
 	session, err := client.CreateSession(ctx, fmt.Sprintf("Comment Response PR#%s", pr.ID), workDir)
 	if err != nil {
-		return fmt.Errorf("creating session: %w", err)
+		return false, fmt.Errorf("creating session: %w", err)
 	}
 	defer client.DeleteSession(ctx, session.ID)
 
 	resp, err := client.SendPrompt(ctx, session.ID, prompt)
 	if err != nil {
-		return fmt.Errorf("sending prompt: %w", err)
+		return false, fmt.Errorf("sending prompt: %w", err)
 	}
 
 	// Parse the response — expect JSON with decision/reply.
@@ -84,7 +78,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, content); err != nil {
 			slog.Warn("failed to reply to comment", "error", err, "threadID", comment.ThreadID)
 		}
-		return nil
+		return false, nil
 	}
 
 	// Reply to the comment.
@@ -94,20 +88,18 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		}
 	}
 
+	committed := false
+
 	// Resolve the thread based on decision.
 	switch strings.ToUpper(commentResp.Decision) {
 	case "AGREE":
 		// The LLM should have made code changes in the session.
-		// Commit and push if there are changes.
-		commitHash, err := gitCommitAndPush(ctx, workDir, pr.Branch, fmt.Sprintf("address review comment on %s:%d", comment.FilePath, comment.Line))
+		// Commit locally (push is batched by the caller).
+		commitHash, err := gitCommit(ctx, workDir, fmt.Sprintf("address review comment on %s:%d", comment.FilePath, comment.Line))
 		if err != nil {
 			slog.Warn("no changes to commit for AGREE decision", "error", err)
 		} else {
-			// Merge pushed changes back to the user's local worktree (best effort).
-			if mbErr := mergeBack(); mbErr != nil {
-				slog.Warn("failed to merge back to user worktree", "prID", pr.ID, "error", mbErr)
-			}
-			// Update the reply with commit hash.
+			committed = true
 			if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, fmt.Sprintf("Fixed in %s", commitHash)); err != nil {
 				slog.Warn("failed to reply to comment", "error", err, "threadID", comment.ThreadID)
 			}
@@ -144,7 +136,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 		slog.Warn("failed to save PR document after comment evaluation", "error", err)
 	}
 
-	return nil
+	return committed, nil
 }
 
 // readCodeContext reads surrounding lines from a file in the work directory.

@@ -418,7 +418,13 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 
 		if t, err := time.Parse(time.RFC3339Nano, ps.UpdatedAt); err == nil {
 			ps.updatedTime = t
-			ps.LastModified = t
+			// Use whichever is more recent: DB timestamp or filesystem ModTime.
+			// Actively running sessions may update files before the DB is flushed.
+			if t.After(ps.LastModified) {
+				ps.LastModified = t
+			} else {
+				ps.updatedTime = ps.LastModified
+			}
 		}
 		result = append(result, ps)
 	}

@@ -798,7 +798,7 @@ func (s *Server) watchPersistedSessions(ctx context.Context) {
 func persistedHash(sessions []copilot.PersistedSession) string {
 	var b strings.Builder
 	for _, s := range sessions {
-		fmt.Fprintf(&b, "%s:%s:%s;", s.SessionID, s.UpdatedAt, s.Summary)
+		fmt.Fprintf(&b, "%s:%s:%d;", s.SessionID, s.Summary, s.LastModified.Unix())
 	}
 	return b.String()
 }

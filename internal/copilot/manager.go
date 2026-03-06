@@ -277,12 +277,76 @@ func (m *Manager) ListSessions() []SessionInfo {
 }
 
 // SendPrompt sends a prompt to the named session.
+// If the SDK reports "Session not found" (e.g. server-side expiry after
+// idle timeout), it automatically resumes the session and retries once.
 func (m *Manager) SendPrompt(ctx context.Context, name, prompt string) error {
 	s := m.GetSession(name)
 	if s == nil {
 		return fmt.Errorf("session %q not found", name)
 	}
-	return s.SendPrompt(ctx, prompt)
+	err := s.SendPrompt(ctx, prompt)
+	if err != nil && isSessionExpired(err) {
+		slog.Warn("session expired server-side, attempting auto-resume", "name", name, "session_id", s.info.SessionID)
+		if resumeErr := m.recoverSession(ctx, name, s); resumeErr != nil {
+			slog.Error("auto-resume failed", "name", name, "error", resumeErr)
+			return err // return original error
+		}
+		// Retry with the recovered session.
+		s = m.GetSession(name)
+		if s == nil {
+			return fmt.Errorf("session %q lost during recovery", name)
+		}
+		return s.SendPrompt(ctx, prompt)
+	}
+	return err
+}
+
+// isSessionExpired checks if an error indicates the SDK session was
+// expired/garbage-collected server-side.
+func isSessionExpired(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "Session not found") ||
+		strings.Contains(msg, "session not found")
+}
+
+// recoverSession replaces a dead session by resuming it from persisted state.
+// The session keeps its display name, history, and position in the session map.
+func (m *Manager) recoverSession(ctx context.Context, name string, dead *Session) error {
+	sessionID := dead.info.SessionID
+
+	// Resume via the SDK (this creates a fresh server-side session from
+	// the persisted state on disk).
+	sdkSession, err := m.client.ResumeSession(ctx, sessionID, &sdk.ResumeSessionConfig{
+		OnPermissionRequest: sdk.PermissionHandler.ApproveAll,
+		Streaming:           true,
+	})
+	if err != nil {
+		return fmt.Errorf("resuming session %s: %w", sessionID, err)
+	}
+
+	// Tear down the dead session's SDK resources.
+	dead.Destroy()
+
+	// Build a new Session wrapper, preserving the existing history so the
+	// UI doesn't lose the conversation.
+	recovered := newSession(name, dead.info.Model, sdkSession, dead.info.WorkingDir)
+	recovered.onEvent = m.onEvent
+
+	// Carry over the chat history from the dead session.
+	recovered.mu.Lock()
+	recovered.history = dead.History()
+	recovered.mu.Unlock()
+
+	// Swap into the manager map.
+	m.mu.Lock()
+	m.sessions[name] = recovered
+	m.mu.Unlock()
+
+	slog.Info("session auto-recovered", "name", name, "session_id", sessionID, "new_sdk_id", sdkSession.SessionID)
+	return nil
 }
 
 // GetHistory returns the chat history for a session.

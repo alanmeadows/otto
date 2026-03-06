@@ -21,7 +21,7 @@ import (
 // ErrAuthExpired indicates that the ADO token has expired and could not
 // be refreshed.  Callers can check for this with errors.Is to short-circuit
 // an entire poll cycle instead of hammering ADO with doomed requests.
-var ErrAuthExpired = fmt.Errorf("ADO authentication expired — run 'az login' to refresh")
+var ErrAuthExpired = fmt.Errorf("ADO authentication expired. Run 'az login' to refresh")
 
 // ansiPattern matches ANSI escape codes for stripping from build logs.
 var ansiPattern = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)

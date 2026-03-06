@@ -88,7 +88,7 @@ PR polling loop (dashboard-only mode).`,
 				os.Setenv("OTTO_TUNNEL_ID", appConfig.Dashboard.TunnelID)
 				fmt.Fprintf(cmd.ErrOrStderr(), "Using auto-generated tunnel ID: %s (override with: otto config set dashboard.tunnel_id \"myname-otto\")\n", appConfig.Dashboard.TunnelID)
 			} else {
-				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tunnel requires dashboard.tunnel_id and $USER is not set — set one with:\n  otto config set dashboard.tunnel_id \"yourname-otto\"\nStarting without tunnel.\n\n")
+				fmt.Fprintf(cmd.ErrOrStderr(), "Warning: tunnel requires dashboard.tunnel_id and $USER is not set. Set one with:\n  otto config set dashboard.tunnel_id \"yourname-otto\"\nStarting without tunnel.\n\n")
 				tunnelEnabled = false
 			}
 		}

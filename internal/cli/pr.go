@@ -139,7 +139,7 @@ polling this PR for review feedback.`,
 			return fmt.Errorf("saving PR document: %w", err)
 		}
 
-		fmt.Fprintf(w, "Added PR #%s (%s) — %s\n", pr.ID, backend.Name(), prInfo.Title)
+		fmt.Fprintf(w, "Added PR #%s (%s) - %s\n", pr.ID, backend.Name(), prInfo.Title)
 
 		// Trigger work item creation if configured (ADO only).
 		providerName := backend.Name()
@@ -469,7 +469,7 @@ func submitPR(ctx context.Context, cmd *cobra.Command, titleOverride, targetBran
 		return fmt.Errorf("checking for uncommitted changes: %w", err)
 	}
 	if dirty {
-		return fmt.Errorf("working directory has uncommitted changes — commit or stash first")
+		return fmt.Errorf("working directory has uncommitted changes, commit or stash first")
 	}
 
 	// Step 3: Get backend.
@@ -765,7 +765,7 @@ func notifyDaemon(w io.Writer) {
 	}
 	resp.Body.Close()
 	if resp.StatusCode == http.StatusOK {
-		fmt.Fprintf(w, "  ✓ Daemon notified — immediate poll triggered\n")
+		fmt.Fprintf(w, "  ✓ Daemon notified, immediate poll triggered\n")
 	}
 }
 

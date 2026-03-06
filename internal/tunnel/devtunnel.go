@@ -156,11 +156,11 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 	m.mu.Unlock()
 
 	if !hasBgtask() {
-		slog.Warn("tunnel skipped: bgtask is not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+		slog.Warn("tunnel skipped: bgtask is not installed. Install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
 		return nil
 	}
 	if !m.IsInstalled() {
-		slog.Warn("tunnel skipped: devtunnel is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+		slog.Warn("tunnel skipped: devtunnel is not installed. Install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
 		return nil
 	}
 	if m.config.TunnelID == "" {

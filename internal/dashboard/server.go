@@ -85,7 +85,7 @@ func NewServer(cfg *config.Config) *Server {
 		keyedURL := ""
 		if running && url != "" {
 			keyedURL = url + "?key=" + dashKey
-			slog.Info("tunnel connected — dashboard available remotely", "url", keyedURL)
+			slog.Info("tunnel connected, dashboard available remotely", "url", url)
 		}
 		bridge.BroadcastTunnelStatus(running, url, keyedURL)
 	})
@@ -93,7 +93,7 @@ func NewServer(cfg *config.Config) *Server {
 	// Wire tunnel and worktree commands from WebSocket to server.
 	bridge.onStartTunnel = func() {
 		if !tmgr.IsInstalled() {
-			slog.Warn("devtunnel CLI is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash")
+			slog.Warn("devtunnel CLI is not installed. Install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash")
 			bridge.BroadcastTunnelStatus(false, "devtunnel not installed")
 			return
 		}
@@ -224,7 +224,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		if !tunnel.IsBgtaskInstalled() {
 			slog.Warn("tunnel skipped: bgtask is not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
 		} else if !s.tunnelMgr.IsInstalled() {
-			slog.Warn("tunnel skipped: devtunnel is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+			slog.Warn("tunnel skipped: devtunnel is not installed. Install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
 		} else {
 			slog.Info("starting tunnel", "tunnel_id", s.cfg.Dashboard.TunnelID, "access", s.cfg.Dashboard.TunnelAccess, "forwarding_port", port)
 			go func() {

@@ -139,7 +139,7 @@ in the worker pool".`,
 		}
 
 		if len(comments) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No issues found — the PR looks clean.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No issues found. The PR looks clean.")
 			return nil
 		}
 
@@ -200,7 +200,7 @@ in the worker pool".`,
 		}
 
 		if len(selected) == 0 {
-			fmt.Fprintln(cmd.OutOrStdout(), "No comments selected — skipping.")
+			fmt.Fprintln(cmd.OutOrStdout(), "No comments selected, skipping.")
 			return nil
 		}
 

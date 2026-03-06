@@ -199,7 +199,7 @@ func (r *forkResult) printStatus() {
 		if !tunnel.IsBgtaskInstalled() {
 			fmt.Printf("tunnel: skipped (bgtask not installed — go install github.com/philsphicas/bgtask/cmd/bgtask@latest)\n")
 		} else if !(&tunnel.Manager{}).IsInstalled() {
-			fmt.Printf("tunnel: skipped (devtunnel not installed — curl -sL https://aka.ms/DevTunnelCliInstall | bash)\n")
+			fmt.Printf("tunnel: skipped (devtunnel not installed. Install: curl -sL https://aka.ms/DevTunnelCliInstall | bash)\n")
 		} else if tunnelURL := pollTunnelURL(r.dashPort); tunnelURL != "" {
 			fmt.Printf("tunnel: %s\n", tunnelURL)
 		} else {
@@ -474,7 +474,7 @@ WantedBy=default.target
 	}
 
 	fmt.Printf("installed otto.service at %s\n", unitPath)
-	fmt.Println("service enabled — start with: systemctl --user start otto")
+	fmt.Println("service enabled. Start with: systemctl --user start otto")
 	return nil
 }
 

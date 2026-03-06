@@ -243,7 +243,7 @@ func FindPR(id string) (*PRDocument, error) {
 	case 1:
 		return matches[0], nil
 	default:
-		return nil, fmt.Errorf("ambiguous PR ID %s — found in multiple providers; specify provider", id)
+		return nil, fmt.Errorf("ambiguous PR ID %s, found in multiple providers; specify provider", id)
 	}
 }
 
@@ -270,11 +270,11 @@ func InferPR() (*PRDocument, error) {
 	}
 	switch len(prs) {
 	case 0:
-		return nil, fmt.Errorf("no tracked PRs — add one with: otto pr add <url>")
+		return nil, fmt.Errorf("no tracked PRs. Add one with: otto pr add <url>")
 	case 1:
 		return prs[0], nil
 	default:
-		return nil, fmt.Errorf("multiple PRs tracked — specify an ID")
+		return nil, fmt.Errorf("multiple PRs tracked, specify an ID")
 	}
 }
 
@@ -646,7 +646,7 @@ Do NOT introduce unnecessary changes beyond resolving the conflicts.`, pr.ID, pr
 		abortCmd := exec.CommandContext(ctx, "git", "rebase", "--abort")
 		abortCmd.Dir = workDir
 		_ = abortCmd.Run()
-		return fmt.Errorf("LLM did not complete rebase — conflicts may be too complex")
+		return fmt.Errorf("LLM did not complete rebase, conflicts may be too complex")
 	}
 
 	// Push the rebased branch.
@@ -898,7 +898,7 @@ func pollAllPRs(ctx context.Context, reg *provider.Registry, client llm.Client, 
 		if err := pollSinglePR(ctx, pr, reg, client, cfg); err != nil {
 			// If auth is broken, skip remaining PRs — they'll all fail the same way.
 			if errors.Is(err, ado.ErrAuthExpired) {
-				slog.Error("authentication expired, skipping remaining PRs — run 'az login' to refresh", "prID", pr.ID)
+				slog.Error("authentication expired, skipping remaining PRs. Run 'az login' to refresh", "prID", pr.ID)
 				break
 			}
 			slog.Error("failed to poll PR", "prID", pr.ID, "error", err)

@@ -119,7 +119,8 @@ type DashboardConfig struct {
 	// Runtime-only fields (set by CLI flags or server startup, not persisted).
 	Enabled         bool   `json:"-"` // controlled by --no-dashboard
 	AutoStartTunnel bool   `json:"-"` // controlled by --no-tunnel
-	CopilotServer   string `json:"-"` // set at runtime by ensureCopilotServer()
+	CopilotServer   string `json:"-"` // set at runtime by ensureCopilotServer or from CopilotServerOverride
+	CopilotServerOverride string `json:"copilot_server,omitempty"` // user-managed server URL; empty = otto manages one
 }
 
 // NotificationsConfig holds notification settings.

@@ -38,11 +38,20 @@ func TriggerPoll() {
 func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 	serverStartTime = time.Now()
 
-	// Start (or attach to) the managed copilot headless server.
-	copilotURL, err := ensureCopilotServer()
-	if err != nil {
-		slog.Error("failed to start copilot server", "error", err)
-		return fmt.Errorf("copilot server: %w", err)
+	// Start (or attach to) the copilot headless server.
+	var copilotURL string
+	if cfg.Dashboard.CopilotServerOverride != "" {
+		// User manages their own server.
+		copilotURL = cfg.Dashboard.CopilotServerOverride
+		slog.Info("using user-managed copilot server", "url", copilotURL)
+	} else {
+		// Otto manages the server via bgtask.
+		var err error
+		copilotURL, err = ensureCopilotServer()
+		if err != nil {
+			slog.Error("failed to start copilot server", "error", err)
+			return fmt.Errorf("copilot server: %w", err)
+		}
 	}
 	// Set for downstream consumers.
 	cfg.Dashboard.CopilotServer = copilotURL

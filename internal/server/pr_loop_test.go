@@ -176,6 +176,8 @@ func TestIsInfraFailure(t *testing.T) {
 		{"fallback retry without infra root cause", "## Summary\n\nTest failed.\n\n### Recommended Action\n\nRetry the build.", false},
 		{"fallback recommendation heading with retry", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe primary failure is consistent with a flaky or environment-dependent test infrastructure issue.\n\n### Recommendation\n\n**Retry the build.**", true},
 		{"fallback retry-resolve phrasing", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe failure points to a transient infrastructure issue in the Windows build container. **A retry is likely to resolve this.**", true},
+		{"fallback transient build environment with retry", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nBoth failures are characteristic of a **transient build environment issue**: the PowerShell unit test runner crashed or errored in a way unrelated to the PR's code changes.\n\n### Recommendation\n\n**Retry the build.** No code changes are indicated.", true},
+		{"fallback transient environment without structural marker", "The failure is a transient environment glitch.\n\nRetry recommended.", false},
 	}
 
 	for _, tt := range tests {

@@ -690,7 +690,9 @@ func isInfraFailure(diagnosis string) bool {
 	// Fallback: No CLASSIFICATION marker found. Check for structured
 	// indicators that the diagnosis describes an infrastructure failure.
 	upper := strings.ToUpper(diagnosis)
-	hasInfraRootCause := strings.Contains(upper, "INFRASTRUCTURE") &&
+	infraSignal := strings.Contains(upper, "INFRASTRUCTURE") ||
+		(strings.Contains(upper, "TRANSIENT") && strings.Contains(upper, "ENVIRONMENT"))
+	hasInfraRootCause := infraSignal &&
 		(strings.Contains(upper, "ROOT CAUSE") || strings.Contains(upper, "FAILURE SUMMARY") || strings.Contains(upper, "DIAGNOSIS"))
 	hasRetryAction := strings.Contains(upper, "RETRY") &&
 		(strings.Contains(upper, "RECOMMEND") || strings.Contains(upper, "ACTION") || strings.Contains(upper, "RESOLVE"))

@@ -134,7 +134,7 @@ return nil
 
 // Start hosts a devtunnel on the given port via bgtask.
 // Both bgtask and devtunnel must be installed; returns an error otherwise.
-func (m *Manager) Start(_ context.Context, port int) error {
+func (m *Manager) Start(ctx context.Context, port int) error {
 	m.mu.Lock()
 	if m.running {
 		m.mu.Unlock()
@@ -158,18 +158,26 @@ func (m *Manager) Start(_ context.Context, port int) error {
 
 	// Check if the bgtask tunnel is already running (e.g. Otto restarting).
 	if url := m.discoverBgtaskURL(); url != "" {
-		m.mu.Lock()
-		m.running = true
-		m.url = url
-		m.port = port
-		cb := m.onStatusChange
-		m.mu.Unlock()
+		// Validate the tunnel is actually connected to the relay.
+		if m.isTunnelConnected() {
+			m.mu.Lock()
+			m.running = true
+			m.url = url
+			m.port = port
+			cb := m.onStatusChange
+			m.mu.Unlock()
 
-		slog.Info("attached to existing bgtask tunnel", "url", url)
-		if cb != nil {
-			cb(true, url)
+			slog.Info("attached to existing bgtask tunnel", "url", url)
+			if cb != nil {
+				cb(true, url)
+			}
+			// Start health monitor.
+			go m.healthMonitor(ctx, port)
+			return nil
 		}
-		return nil
+		// Process is alive but relay connection is dead — restart it.
+		slog.Warn("existing tunnel process has no relay connection, restarting", "tunnel_id", m.config.TunnelID)
+		exec.Command("bgtask", "rm", bgtaskTunnelName).Run() //nolint:errcheck
 	}
 
 	// Ensure persistent tunnel exists with correct access config.
@@ -201,8 +209,11 @@ func (m *Manager) Start(_ context.Context, port int) error {
 		cb(true, "")
 	}
 
-	// Poll for the URL in the background.
-	go m.pollBgtaskURL()
+	// Poll for the URL in the background, then start health monitor.
+	go func() {
+		m.pollBgtaskURL()
+		m.healthMonitor(ctx, port)
+	}()
 	return nil
 }
 
@@ -314,6 +325,74 @@ out, err := cmd.CombinedOutput()
 if err != nil {
 slog.Debug("tunnel setup command", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
 }
+}
+
+// isTunnelConnected checks whether the tunnel has an active host connection
+// to the Azure relay by running `devtunnel show`.
+func (m *Manager) isTunnelConnected() bool {
+	tid := m.config.TunnelID
+	if tid == "" {
+		return false
+	}
+	cmd := exec.Command("devtunnel", "show", tid)
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if strings.Contains(line, "Host connections") {
+			// "Host connections      : 1" means connected; "0" means dead.
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				return strings.TrimSpace(parts[1]) != "0"
+			}
+		}
+	}
+	return false
+}
+
+// healthMonitor periodically checks that the tunnel host process is actually
+// connected to the Azure relay. If the connection drops (process alive but
+// relay disconnected), it restarts the bgtask tunnel.
+func (m *Manager) healthMonitor(ctx context.Context, port int) {
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.mu.Lock()
+			running := m.running
+			m.mu.Unlock()
+			if !running {
+				return
+			}
+
+			if m.isTunnelConnected() {
+				continue
+			}
+
+			slog.Warn("tunnel health check failed: host connection lost, restarting",
+				"tunnel_id", m.config.TunnelID)
+
+			// Kill the stale bgtask and restart.
+			exec.Command("bgtask", "rm", bgtaskTunnelName).Run() //nolint:errcheck
+
+			args := []string{"run", "--name", bgtaskTunnelName, "--restart", "always",
+				"--", "devtunnel", "host", m.config.TunnelID}
+			cmd := exec.Command("bgtask", args...)
+			if err := cmd.Run(); err != nil {
+				slog.Error("failed to restart tunnel after health check failure", "error", err)
+				continue
+			}
+
+			slog.Info("tunnel restarted by health monitor", "tunnel_id", m.config.TunnelID)
+			// Re-discover the URL.
+			go m.pollBgtaskURL()
+		}
+	}
 }
 
 func generateShortID() string {

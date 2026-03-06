@@ -422,8 +422,8 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 		pr.Status = "watching"
 		pr.PipelineState = "inProgress"
 		pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
-		pr.Body += fmt.Sprintf("\n\n### Infra Retry - %s\n- **Trigger**: Infrastructure failure detected\n- **Action**: Retried %d build(s)\n- **Diagnosis**: %s\n",
-			pr.LastChecked, len(failedBuildIDs), strings.Split(diagnosis, "\n")[0])
+		pr.Body += fmt.Sprintf("\n\n### Infra Retry - %s\n- **Trigger**: Infrastructure failure detected\n- **Builds requeued**: %d\n",
+			pr.LastChecked, len(failedBuildIDs))
 
 		if err := SavePR(pr); err != nil {
 			return fmt.Errorf("saving PR after infra retry: %w", err)
@@ -478,8 +478,8 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 	// Update PR document.
 	pr.FixAttempts++
 	pr.LastChecked = time.Now().UTC().Format(time.RFC3339)
-	pr.Body += fmt.Sprintf("\n\n### Attempt %d - %s\n- **Trigger**: Pipeline failure\n- **Action**: %s\n- **Result**: Pending\n- **Commit**: %s\n",
-		pr.FixAttempts, pr.LastChecked, strings.Split(diagnosis, "\n")[0], commitHash)
+	pr.Body += fmt.Sprintf("\n\n### Attempt %d - %s\n- **Trigger**: Pipeline failure\n- **Commit**: %s\n",
+		pr.FixAttempts, pr.LastChecked, commitHash)
 
 	if pr.FixAttempts >= pr.MaxFixAttempts {
 		pr.Status = "failed"

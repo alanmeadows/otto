@@ -635,14 +635,13 @@ function statusCard(label, icon, value, color) {
 }
 
 function renderFixTimeline(body) {
-    // Parse "### Attempt N" or "### Infra Retry" entries
-    const regex = /^### (Attempt \d+|Infra Retry)\s*[-–—]\s*(.+)$/gm;
+    // Parse "### Attempt N", "### Infra Retry", and "### Comment by" entries
+    const regex = /^### (Attempt \d+|Infra Retry|Comment by .+?)\s*[-–—]\s*(.+)$/gm;
     const entries = [];
     let match;
     while ((match = regex.exec(body)) !== null) {
         const title = match[1];
         const timestamp = match[2].trim();
-        // Grab lines until next heading or end
         const startIdx = match.index + match[0].length;
         const nextHeading = body.indexOf('\n###', startIdx);
         const block = body.substring(startIdx, nextHeading > -1 ? nextHeading : undefined).trim();
@@ -650,14 +649,16 @@ function renderFixTimeline(body) {
     }
     if (entries.length === 0) return '';
 
-    let html = '<h4 class="timeline-heading">Fix History</h4>';
+    // Reverse: latest activity first.
+    entries.reverse();
+
+    let html = '<h4 class="timeline-heading">Activity</h4>';
     html += '<div class="timeline">';
     entries.forEach((e, i) => {
-        const isLast = i === entries.length - 1;
+        const isFirst = i === 0;
         const timeStr = formatTimelineDate(e.timestamp);
-        // Parse key-value lines (e.g. "- **Trigger**: pipeline failure")
         const details = parseTimelineDetails(e.block);
-        html += `<div class="timeline-entry${isLast ? ' latest' : ''}">
+        html += `<div class="timeline-entry${isFirst ? ' latest' : ''}">
             <div class="timeline-dot"></div>
             <div class="timeline-content">
                 <div class="timeline-title">${escapeHtml(e.title)}</div>
@@ -700,8 +701,8 @@ function formatTimelineDate(str) {
 }
 
 function stripTimelineEntries(body) {
-    // Remove ### Attempt / ### Infra Retry blocks (heading + following non-heading lines).
-    return body.replace(/^### (?:Attempt \d+|Infra Retry)[^\n]*\n(?:(?!^###)[^\n]*\n?)*/gm, '').trim();
+    // Remove ### Attempt / ### Infra Retry / ### Comment by blocks.
+    return body.replace(/^### (?:Attempt \d+|Infra Retry|Comment by .+?)[^\n]*\n(?:(?!^###)[^\n]*\n?)*/gm, '').trim();
 }
 
 function renderMarkdownSimple(md) {

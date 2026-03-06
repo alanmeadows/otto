@@ -225,6 +225,16 @@ body {
     overflow: hidden;
     text-overflow: ellipsis;
 }
+.persisted-card-active {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--yellow);
+    margin-right: 4px;
+    vertical-align: middle;
+    animation: pulse 1s infinite;
+}
 
 /* Main content */
 #content {

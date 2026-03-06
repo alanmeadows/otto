@@ -28,6 +28,7 @@ type PersistedSession struct {
 	Summary      string    `json:"summary,omitempty"`
 	CreatedAt    string    `json:"created_at,omitempty"`
 	UpdatedAt    string    `json:"updated_at,omitempty"`
+	IsActive     bool      `json:"is_active,omitempty"` // true if session files were modified recently
 	updatedTime  time.Time // parsed UpdatedAt for sorting
 }
 
@@ -424,14 +425,26 @@ func (m *Manager) ListPersistedSessions() []PersistedSession {
 
 		if t, err := time.Parse(time.RFC3339Nano, ps.UpdatedAt); err == nil {
 			ps.updatedTime = t
-			// Use whichever is more recent: DB timestamp or filesystem ModTime.
-			// Actively running sessions may update files before the DB is flushed.
 			if t.After(ps.LastModified) {
 				ps.LastModified = t
 			} else {
 				ps.updatedTime = ps.LastModified
 			}
 		}
+
+		// Detect actively running sessions by checking events.jsonl ModTime.
+		// If it was modified in the last 60 seconds, the session is likely mid-turn.
+		if evInfo, err := os.Stat(filepath.Join(ps.Path, "events.jsonl")); err == nil {
+			evMod := evInfo.ModTime()
+			if evMod.After(ps.LastModified) {
+				ps.LastModified = evMod
+				ps.updatedTime = evMod
+			}
+			if time.Since(evMod) < 60*time.Second {
+				ps.IsActive = true
+			}
+		}
+
 		result = append(result, ps)
 	}
 

@@ -410,9 +410,10 @@ function renderPersistedSessionList() {
         const summary = p.summary || 'No summary';
         const ago = p.updated_at ? timeAgo(p.updated_at) : '';
         const agoClass = isRecentlyActive(p.updated_at) ? 'recently-active' : '';
+        const activeDot = p.is_active ? '<span class="persisted-card-active" title="Session is actively running"></span>' : '';
         card.innerHTML = `
             <div class="persisted-card-header">
-                <span class="persisted-card-id">${esc(shortId)}…</span>
+                <span class="persisted-card-id">${activeDot}${esc(shortId)}…</span>
                 ${ago ? `<span class="persisted-card-ago ${agoClass}">${esc(ago)}</span>` : ''}
             </div>
             <div class="persisted-card-summary" title="${esc(p.summary || '')}">${esc(summary.length > 60 ? summary.substring(0, 57) + '...' : summary)}</div>

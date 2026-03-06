@@ -398,6 +398,7 @@ func (b *Bridge) sendPersistedSessions(client *wsClient) {
 			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
 			CreatedAt:    p.CreatedAt,
 			UpdatedAt:    p.UpdatedAt,
+			IsActive:     p.IsActive,
 		}
 	}
 	b.sendTo(client, MsgPersistedSessionsList, PersistedSessionsListPayload{
@@ -415,6 +416,7 @@ func (b *Bridge) broadcastPersistedSessions() {
 			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
 			CreatedAt:    p.CreatedAt,
 			UpdatedAt:    p.UpdatedAt,
+			IsActive:     p.IsActive,
 		}
 	}
 	b.broadcast(MsgPersistedSessionsList, PersistedSessionsListPayload{

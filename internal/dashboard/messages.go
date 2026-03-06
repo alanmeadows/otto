@@ -173,6 +173,7 @@ type PersistedSessionSummary struct {
 	LastModified string `json:"last_modified"`
 	CreatedAt    string `json:"created_at"`
 	UpdatedAt    string `json:"updated_at"`
+	IsActive     bool   `json:"is_active,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

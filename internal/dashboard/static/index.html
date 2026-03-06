@@ -96,6 +96,7 @@
                         <button id="share-btn" class="btn btn-sm" title="Share this session (read-only, 1hr)">🔗 Share</button>
                     </div>
                     <div id="chat-messages"></div>
+                    <div id="new-messages-pill" class="hidden" title="Jump to latest">↓ New messages</div>
                     <div id="chat-input-area">
                         <textarea id="chat-input" placeholder="Send a message..." rows="1"></textarea>
                         <button id="send-btn" class="btn btn-primary" disabled>Send</button>
@@ -110,9 +111,15 @@
                             <h3 id="pr-detail-title"></h3>
                             <a id="pr-detail-link" href="#" target="_blank" rel="noopener" class="btn btn-sm">View PR ↗</a>
                         </div>
+                        <div id="pr-detail-branches" class="pr-detail-branches"></div>
                         <div id="pr-detail-meta" class="pr-detail-meta"></div>
                     </div>
-                    <div id="pr-detail-body" class="pr-detail-body"></div>
+                    <div id="pr-detail-content" class="pr-detail-content">
+                        <div id="pr-detail-status-grid" class="pr-status-grid"></div>
+                        <div id="pr-detail-progress" class="pr-detail-progress"></div>
+                        <div id="pr-detail-timeline" class="pr-detail-timeline"></div>
+                        <div id="pr-detail-body" class="pr-detail-body"></div>
+                    </div>
                 </div>
             </main>
         </div>

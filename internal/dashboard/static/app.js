@@ -16,6 +16,8 @@ const state = {
     tunnelRunning: false,
     tunnelURL: '',
     ownerNickname: 'owner',
+    userScrolledUp: false,  // true when user has scrolled away from bottom
+    pendingPrompt: null,    // prompt text awaiting server broadcast
 };
 
 // --- WebSocket ---
@@ -146,6 +148,10 @@ function handleSessionHistory(payload) {
     const container = document.getElementById('chat-messages');
     const messages = (payload.messages || []).filter(msg => msg.content && msg.content.trim());
 
+    // Clean up any pending message that might still be showing.
+    const pending = document.getElementById('pending-message');
+    if (pending) pending.remove();
+
     if (payload._appendOnly) {
         // Only append messages we haven't rendered yet.
         const newMessages = messages.slice(state.renderedMessageCount);
@@ -260,7 +266,17 @@ function handleReasoningDelta(payload) {
 
 function handleUserMessage(payload) {
     if (payload.session_name !== state.activeSession) return;
+
+    // Check if there's a pending message placeholder to replace.
+    const pending = document.getElementById('pending-message');
+    if (pending) {
+        pending.remove();
+    }
+
     appendChatMessage('user', payload.content, false);
+    // Keep renderedMessageCount in sync so fetchAndAppendNew (turn_end
+    // fallback) doesn't re-render this message from the history slice.
+    state.renderedMessageCount++;
 }
 
 function handlePersistedSessionsList(payload) {
@@ -452,21 +468,169 @@ function renderPRDetail(pr) {
     document.getElementById('pr-detail-title').textContent = pr.title || 'PR #' + pr.id;
     document.getElementById('pr-detail-link').href = pr.url || '#';
 
-    const waitingOn = prWaitingOn(pr);
+    // Branch info
+    const branchEl = document.getElementById('pr-detail-branches');
+    if (pr.branch || pr.target) {
+        branchEl.innerHTML = '<span class="branch-label">' + escapeHtml(pr.branch || '?') +
+            '</span> <span class="branch-arrow">→</span> <span class="branch-label">' +
+            escapeHtml(pr.target || '?') + '</span>';
+    } else {
+        branchEl.innerHTML = '';
+    }
+
+    // Compact meta tags (provider, repo, last checked)
     const meta = [
         `<span class="pr-detail-tag">${escapeHtml(pr.provider)}</span>`,
-        `<span class="pr-detail-tag">${escapeHtml(pr.repo)}</span>`,
-        `<span class="pr-detail-tag">${escapeHtml(pr.status)}</span>`,
-        pr.pipeline_state ? `<span class="pr-detail-tag">pipeline: ${escapeHtml(pr.pipeline_state)}</span>` : '',
-        waitingOn ? `<span class="pr-detail-tag pr-waiting">waiting: ${escapeHtml(waitingOn)}</span>` : '',
-        pr.fix_attempts > 0 ? `<span class="pr-detail-tag">fixes: ${pr.fix_attempts}/${pr.max_fix_attempts}</span>` : '',
-        pr.last_checked ? `<span class="pr-detail-tag">checked: ${new Date(pr.last_checked).toLocaleTimeString()}</span>` : '',
+        `<span class="pr-detail-tag">${escapeHtml(pr.repo || '')}</span>`,
+        pr.last_checked ? `<span class="pr-detail-tag">checked ${timeAgo(pr.last_checked)}</span>` : '',
     ].filter(Boolean).join(' ');
     document.getElementById('pr-detail-meta').innerHTML = meta;
 
-    // Render body as simple formatted HTML.
-    const body = pr.body || '*No activity recorded yet.*';
-    document.getElementById('pr-detail-body').innerHTML = renderMarkdownSimple(body);
+    // Status grid — visual cards for each stage dimension
+    const grid = document.getElementById('pr-detail-status-grid');
+    grid.innerHTML = renderStatusGrid(pr);
+
+    // Fix attempts progress
+    const progressEl = document.getElementById('pr-detail-progress');
+    if (pr.max_fix_attempts > 0) {
+        const pct = Math.min(100, Math.round((pr.fix_attempts / pr.max_fix_attempts) * 100));
+        const barColor = pr.fix_attempts >= pr.max_fix_attempts ? 'var(--red)' : 'var(--accent)';
+        progressEl.innerHTML = `
+            <div class="progress-header">
+                <span>Fix attempts</span>
+                <span>${pr.fix_attempts} / ${pr.max_fix_attempts}</span>
+            </div>
+            <div class="progress-bar-track">
+                <div class="progress-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+            </div>`;
+    } else {
+        progressEl.innerHTML = '';
+    }
+
+    // Timeline — parse attempt entries from body
+    const timelineEl = document.getElementById('pr-detail-timeline');
+    timelineEl.innerHTML = renderFixTimeline(pr.body || '');
+
+    // Remaining body (rendered with full markdown)
+    const body = stripTimelineEntries(pr.body || '');
+    const bodyEl = document.getElementById('pr-detail-body');
+    if (body.trim()) {
+        bodyEl.innerHTML = renderMarkdown(body);
+    } else {
+        bodyEl.innerHTML = '';
+    }
+}
+
+function renderStatusGrid(pr) {
+    const cards = [];
+
+    // Overall status
+    const statusColors = {
+        merged: 'var(--green)', abandoned: 'var(--text-muted)', fixing: 'var(--yellow)',
+        failed: 'var(--red)', green: 'var(--green)', watching: 'var(--accent)',
+    };
+    cards.push(statusCard('Status', prStatusIcon(pr.status, pr.pipeline_state),
+        pr.status || 'unknown', statusColors[pr.status] || 'var(--text-secondary)'));
+
+    // Pipeline
+    const pipeIcons = { succeeded: '✅', failed: '❌', running: '⏳', inProgress: '⏳', pending: '⏳', unknown: '❓' };
+    const pipeColors = { succeeded: 'var(--green)', failed: 'var(--red)', running: 'var(--yellow)', inProgress: 'var(--yellow)' };
+    cards.push(statusCard('Pipeline', pipeIcons[pr.pipeline_state] || '❓',
+        pr.pipeline_state || 'unknown', pipeColors[pr.pipeline_state] || 'var(--text-secondary)'));
+
+    // Review feedback
+    cards.push(statusCard('Reviews', pr.feedback_done ? '✅' : '💬',
+        pr.feedback_done ? 'resolved' : 'pending', pr.feedback_done ? 'var(--green)' : 'var(--yellow)'));
+
+    // Conflicts
+    cards.push(statusCard('Conflicts', pr.has_conflicts ? '⚠️' : '✅',
+        pr.has_conflicts ? 'conflicts' : 'clean', pr.has_conflicts ? 'var(--red)' : 'var(--green)'));
+
+    // MerlinBot (only show if relevant — when not done)
+    if (!pr.merlinbot_done || pr.provider === 'ado') {
+        cards.push(statusCard('MerlinBot', pr.merlinbot_done ? '✅' : '🤖',
+            pr.merlinbot_done ? 'clear' : 'pending', pr.merlinbot_done ? 'var(--green)' : 'var(--yellow)'));
+    }
+
+    return cards.join('');
+}
+
+function statusCard(label, icon, value, color) {
+    return `<div class="status-card">
+        <div class="status-card-icon">${icon}</div>
+        <div class="status-card-label">${escapeHtml(label)}</div>
+        <div class="status-card-value" style="color:${color}">${escapeHtml(value)}</div>
+    </div>`;
+}
+
+function renderFixTimeline(body) {
+    // Parse "### Attempt N" or "### Infra Retry" entries
+    const regex = /^### (Attempt \d+|Infra Retry)\s*[-–—]\s*(.+)$/gm;
+    const entries = [];
+    let match;
+    while ((match = regex.exec(body)) !== null) {
+        const title = match[1];
+        const timestamp = match[2].trim();
+        // Grab lines until next heading or end
+        const startIdx = match.index + match[0].length;
+        const nextHeading = body.indexOf('\n###', startIdx);
+        const block = body.substring(startIdx, nextHeading > -1 ? nextHeading : undefined).trim();
+        entries.push({ title, timestamp, block });
+    }
+    if (entries.length === 0) return '';
+
+    let html = '<h4 class="timeline-heading">Fix History</h4>';
+    html += '<div class="timeline">';
+    entries.forEach((e, i) => {
+        const isLast = i === entries.length - 1;
+        const timeStr = formatTimelineDate(e.timestamp);
+        // Parse key-value lines (e.g. "- **Trigger**: pipeline failure")
+        const details = parseTimelineDetails(e.block);
+        html += `<div class="timeline-entry${isLast ? ' latest' : ''}">
+            <div class="timeline-dot"></div>
+            <div class="timeline-content">
+                <div class="timeline-title">${escapeHtml(e.title)}</div>
+                <div class="timeline-time">${escapeHtml(timeStr)}</div>
+                ${details}
+            </div>
+        </div>`;
+    });
+    html += '</div>';
+    return html;
+}
+
+function parseTimelineDetails(block) {
+    if (!block) return '';
+    const lines = block.split('\n').filter(l => l.trim().startsWith('-'));
+    if (lines.length === 0) return '<div class="timeline-detail">' + escapeHtml(block.substring(0, 200)) + '</div>';
+    let html = '<div class="timeline-details">';
+    lines.forEach(line => {
+        const cleaned = line.replace(/^-\s*/, '');
+        // Try to parse **Key**: Value
+        const kvMatch = cleaned.match(/^\*\*(.+?)\*\*:\s*(.+)$/);
+        if (kvMatch) {
+            html += `<div class="timeline-kv"><span class="timeline-key">${escapeHtml(kvMatch[1])}</span> ${escapeHtml(kvMatch[2])}</div>`;
+        } else {
+            html += `<div class="timeline-kv">${escapeHtml(cleaned)}</div>`;
+        }
+    });
+    html += '</div>';
+    return html;
+}
+
+function formatTimelineDate(str) {
+    try {
+        const d = new Date(str);
+        if (isNaN(d.getTime())) return str;
+        return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+        return str;
+    }
+}
+
+function stripTimelineEntries(body) {
+    // Remove ### Attempt / ### Infra Retry blocks (heading + following non-heading lines).
+    return body.replace(/^### (?:Attempt \d+|Infra Retry)[^\n]*\n(?:(?!^###)[^\n]*\n?)*/gm, '').trim();
 }
 
 function renderMarkdownSimple(md) {
@@ -715,10 +879,26 @@ function updateSessionMessageCount(name) {
 }
 
 function scrollToBottom() {
+    if (state.userScrolledUp) {
+        // User is reading history — don't hijack their scroll. Show the
+        // "new messages" pill instead.
+        showNewMessagesPill(true);
+        return;
+    }
     const container = document.getElementById('chat-messages');
     requestAnimationFrame(() => {
         container.scrollTop = container.scrollHeight;
     });
+}
+
+function isNearBottom(container) {
+    // Consider "near bottom" if within 80px of the end.
+    return container.scrollHeight - container.scrollTop - container.clientHeight < 80;
+}
+
+function showNewMessagesPill(show) {
+    const pill = document.getElementById('new-messages-pill');
+    if (pill) pill.classList.toggle('hidden', !show);
 }
 
 // --- Simple Markdown Renderer ---
@@ -857,6 +1037,9 @@ function selectSession(name) {
     state.activeSession = name;
     state.selectedPR = null;
     state.renderedMessageCount = 0;
+    state.userScrolledUp = false;
+    state.pendingPrompt = null;
+    showNewMessagesPill(false);
     renderSessionList();
     renderPRs();
     document.getElementById('empty-state').classList.add('hidden');
@@ -908,11 +1091,32 @@ function sendMessage() {
         updateActivity('💭 Thinking...');
     }
     send('send_message', { session_name: state.activeSession, prompt });
-    // Don't append locally — the server broadcasts user_message to all clients
-    // including us, so we'll get it back via handleUserMessage.
+
+    // Show an optimistic pending bubble so the user gets immediate feedback.
+    state.pendingPrompt = prompt;
+    const isQueued = s && s.is_processing;
+    appendPendingMessage(prompt, isQueued);
+
     input.value = '';
     input.style.height = 'auto';
     document.getElementById('send-btn').disabled = true;
+}
+
+function appendPendingMessage(content, queued) {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'message user pending';
+    div.id = 'pending-message';
+    const label = queued ? 'Queued' : 'Sending';
+    div.innerHTML = '<div class="message-sender owner">' + esc(state.ownerNickname) + '</div>' +
+        renderMarkdown(content) +
+        '<div class="pending-badge">' + label + '…</div>';
+    container.appendChild(div);
+    // Pending messages should always scroll down — the user just typed this.
+    state.userScrolledUp = false;
+    showNewMessagesPill(false);
+    const msgs = document.getElementById('chat-messages');
+    requestAnimationFrame(() => { msgs.scrollTop = msgs.scrollHeight; });
 }
 
 function shareSession() {
@@ -1007,6 +1211,24 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     sendBtn.addEventListener('click', sendMessage);
+
+    // Scroll tracking — detect when user scrolls away from bottom.
+    const chatMessages = document.getElementById('chat-messages');
+    chatMessages.addEventListener('scroll', () => {
+        const wasScrolledUp = state.userScrolledUp;
+        state.userScrolledUp = !isNearBottom(chatMessages);
+        // If user scrolled back to bottom, dismiss the pill.
+        if (wasScrolledUp && !state.userScrolledUp) {
+            showNewMessagesPill(false);
+        }
+    });
+
+    // "New messages" pill — click to jump to bottom.
+    document.getElementById('new-messages-pill').addEventListener('click', () => {
+        state.userScrolledUp = false;
+        showNewMessagesPill(false);
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    });
 
     // New session button
     document.getElementById('new-session-btn').addEventListener('click', showNewSessionDialog);

@@ -693,22 +693,12 @@ func TestWorkflowAddressBot(t *testing.T) {
 	// This currently just logs; no error expected.
 }
 
-func TestRetryBuild_ArtifactsExist_QueuesFreshBuild(t *testing.T) {
+func TestRetryBuild_AlwaysQueuesFreshBuild(t *testing.T) {
 	var freshBuildQueued bool
 	var freshBuildBody map[string]any
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			// Build has existing artifacts.
-			json.NewEncoder(w).Encode(map[string]any{
-				"count": 2,
-				"value": []map[string]any{
-					{"id": 1, "name": "drop_windows_api_testing_collect_results"},
-					{"id": 2, "name": "drop_windows_api_testing_cleanup_propagator"},
-				},
-			})
-
 		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/builds/99999") && !strings.Contains(r.URL.Path, "/artifacts"):
 			// Return build details for fresh build.
 			json.NewEncoder(w).Encode(map[string]any{
@@ -736,117 +726,6 @@ func TestRetryBuild_ArtifactsExist_QueuesFreshBuild(t *testing.T) {
 	err := b.RetryBuild(context.Background(), pr, "99999")
 	require.NoError(t, err)
 
-	assert.True(t, freshBuildQueued, "should queue a fresh build when artifacts exist")
+	assert.True(t, freshBuildQueued, "should always queue a fresh build, never retry in-place")
 	assert.Equal(t, "abc123def456", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
-}
-
-func TestRetryBuild_NoArtifacts(t *testing.T) {
-	var retryCalled bool
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			json.NewEncoder(w).Encode(map[string]any{"count": 0, "value": []any{}})
-
-		case r.Method == http.MethodPatch && strings.Contains(r.URL.Path, "/builds/100") && r.URL.Query().Get("retry") == "true":
-			retryCalled = true
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{"id": 100})
-
-		default:
-			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	b := newTestBackend(t, server)
-	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
-
-	err := b.RetryBuild(context.Background(), pr, "100")
-	require.NoError(t, err)
-	assert.True(t, retryCalled, "should still retry even with no artifacts")
-}
-
-func TestRetryBuild_ArtifactListFailure_QueuesFreshBuild(t *testing.T) {
-	var freshBuildQueued bool
-	var freshBuildBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			// Return a server error for artifact listing.
-			http.Error(w, "internal error", http.StatusInternalServerError)
-
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/builds/200") && !strings.Contains(r.URL.Path, "/artifacts"):
-			// Return build details for fresh build fallback.
-			json.NewEncoder(w).Encode(map[string]any{
-				"id":            200,
-				"sourceBranch":  "refs/pull/42/merge",
-				"sourceVersion": "abc123def456",
-				"definition":    map[string]any{"id": 10, "name": "Azlocal-Overlay-PullRequest"},
-			})
-
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/builds") && !strings.Contains(r.URL.Path, "/200"):
-			freshBuildQueued = true
-			json.NewDecoder(r.Body).Decode(&freshBuildBody)
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{"id": 201})
-
-		default:
-			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	b := newTestBackend(t, server)
-	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
-
-	err := b.RetryBuild(context.Background(), pr, "200")
-	require.NoError(t, err)
-	assert.True(t, freshBuildQueued, "should queue a fresh build when artifact cleanup fails")
-	assert.Equal(t, "abc123def456", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
-}
-
-func TestRetryBuild_SingleArtifact_QueuesFreshBuild(t *testing.T) {
-	var freshBuildQueued bool
-	var freshBuildBody map[string]any
-
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/artifacts"):
-			// Build has a single artifact.
-			json.NewEncoder(w).Encode(map[string]any{
-				"count": 1,
-				"value": []map[string]any{
-					{"id": 1, "name": "drop_windows_api_testing_collect_results"},
-				},
-			})
-
-		case r.Method == http.MethodGet && strings.Contains(r.URL.Path, "/builds/300") && !strings.Contains(r.URL.Path, "/artifacts"):
-			json.NewEncoder(w).Encode(map[string]any{
-				"id":            300,
-				"sourceBranch":  "refs/pull/42/merge",
-				"sourceVersion": "def789abc012",
-				"definition":    map[string]any{"id": 15, "name": "Azlocal-Overlay-PullRequest"},
-			})
-
-		case r.Method == http.MethodPost && strings.Contains(r.URL.Path, "/builds") && !strings.Contains(r.URL.Path, "/300"):
-			freshBuildQueued = true
-			json.NewDecoder(r.Body).Decode(&freshBuildBody)
-			w.WriteHeader(http.StatusOK)
-			json.NewEncoder(w).Encode(map[string]any{"id": 301})
-
-		default:
-			http.Error(w, "unexpected request: "+r.Method+" "+r.URL.String(), http.StatusNotFound)
-		}
-	}))
-	defer server.Close()
-
-	b := newTestBackend(t, server)
-	pr := &provider.PRInfo{ID: "42", Organization: "testorg", Project: "testproject"}
-
-	err := b.RetryBuild(context.Background(), pr, "300")
-	require.NoError(t, err)
-	assert.True(t, freshBuildQueued, "should queue fresh build when artifacts exist")
-	assert.Equal(t, "def789abc012", freshBuildBody["sourceVersion"], "fresh build should propagate sourceVersion")
 }

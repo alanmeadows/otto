@@ -857,44 +857,14 @@ func (b *Backend) resolveRepo(pr *provider.PRInfo) string {
 // Verify Backend implements PRBackend at compile time.
 var _ provider.PRBackend = (*Backend)(nil)
 
-// RetryBuild retries a failed build by its ID using the ADO REST API.
-// If the build has existing artifacts, it queues a fresh build instead
-// of retrying in-place, because in-place retries (PATCH ?retry=true)
-// are unreliable when artifacts exist — ADO can produce "artifact already
-// exists" errors even after successful artifact deletion.
+// RetryBuild queues a fresh top-level build for the same pipeline definition.
+// In-place retries (PATCH ?retry=true) are never used because they re-run
+// individual jobs which hit idempotency errors (artifact dirs already existing,
+// partial state from previous runs, etc.). A fresh build is always clean.
 func (b *Backend) RetryBuild(ctx context.Context, pr *provider.PRInfo, buildID string) error {
 	org := b.resolveOrg(pr)
 	project := b.resolveProject(pr)
-
-	// Check for existing artifacts. In-place retries are unreliable when
-	// artifacts exist, so queue a fresh build in that case.
-	artifacts, err := b.listBuildArtifacts(ctx, org, project, buildID)
-	if err != nil {
-		slog.Warn("could not check build artifacts, falling back to fresh build",
-			"buildID", buildID, "error", err)
-		return b.queueFreshBuild(ctx, org, project, buildID, pr)
-	}
-	if len(artifacts) > 0 {
-		slog.Info("build has existing artifacts, queuing fresh build instead of in-place retry",
-			"buildID", buildID, "artifactCount", len(artifacts))
-		return b.queueFreshBuild(ctx, org, project, buildID, pr)
-	}
-
-	path := fmt.Sprintf("/%s/%s/_apis/build/builds/%s?retry=true",
-		url.PathEscape(org), url.PathEscape(project), buildID)
-
-	resp, err := b.doRequest(ctx, http.MethodPatch, path, map[string]any{"retry": true})
-	if err != nil {
-		return fmt.Errorf("failed to retry build %s: %w", buildID, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
-		return fmt.Errorf("retry build %s returned status %d: %w", buildID, resp.StatusCode, b.parseError(resp))
-	}
-
-	slog.Info("build retry queued", "buildID", buildID, "prID", pr.ID)
-	return nil
+	return b.queueFreshBuild(ctx, org, project, buildID, pr)
 }
 
 // listBuildArtifacts returns the current artifacts for a build.

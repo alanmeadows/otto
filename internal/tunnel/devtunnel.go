@@ -170,7 +170,8 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 			m.config.TunnelID = fmt.Sprintf("otto-%s", generateShortID())
 			slog.Info("auto-creating persistent tunnel for access control", "tunnel_id", m.config.TunnelID)
 		} else {
-			return fmt.Errorf("tunnel_id is required in config for bgtask-managed tunnels")
+			slog.Warn("tunnel skipped: dashboard.tunnel_id not configured — set with: otto config set dashboard.tunnel_id \"yourname-otto\"")
+			return nil
 		}
 	}
 

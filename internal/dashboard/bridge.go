@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/alanmeadows/otto/internal/copilot"
 	"github.com/coder/websocket"
@@ -448,7 +449,7 @@ func (b *Bridge) sendPersistedSessions(client *wsClient) {
 		summaries[i] = PersistedSessionSummary{
 			SessionID:    p.SessionID,
 			Summary:      p.Summary,
-			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
+			LastModified: p.LastModified.UTC().Format(time.RFC3339),
 			CreatedAt:    p.CreatedAt,
 			UpdatedAt:    p.UpdatedAt,
 			IsActive:     p.IsActive,
@@ -466,7 +467,7 @@ func (b *Bridge) broadcastPersistedSessions() {
 		summaries[i] = PersistedSessionSummary{
 			SessionID:    p.SessionID,
 			Summary:      p.Summary,
-			LastModified: p.LastModified.Format("2006-01-02T15:04:05Z"),
+			LastModified: p.LastModified.UTC().Format(time.RFC3339),
 			CreatedAt:    p.CreatedAt,
 			UpdatedAt:    p.UpdatedAt,
 			IsActive:     p.IsActive,

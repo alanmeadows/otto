@@ -147,6 +147,23 @@ function handleSessionsList(payload) {
             send('get_persisted_sessions', {});
         }
     }
+    // If a resume was triggered by sending a message, send the queued prompt.
+    if (state._pendingResumeName) {
+        const found = state.sessions.find(s => s.name === state._pendingResumeName);
+        if (found) {
+            const name = state._pendingResumeName;
+            const prompt = state._pendingResumePrompt;
+            state._pendingResumeName = null;
+            state._pendingResumePrompt = null;
+            selectSession(name);
+            send('get_persisted_sessions', {});
+            if (prompt) {
+                setTimeout(() => {
+                    send('send_message', { session_name: name, prompt: prompt });
+                }, 500);
+            }
+        }
+    }
 }
 
 function handleSessionHistory(payload) {
@@ -428,12 +445,14 @@ function handlePersistedSessionClick(sessionId) {
     const session = state.persistedSessions.find(p => p.session_id === sessionId);
     if (!session) return;
 
+    const title = session.summary || sessionId.substring(0, 8);
     if (session.is_active) {
-        // Active session: open watch mode (read-only live view).
-        watchSession(sessionId, session.summary || sessionId.substring(0, 8));
+        // Active session: watch mode with live tailing.
+        watchSession(sessionId, title);
     } else {
-        // Idle session: resume it.
-        resumePersistedSession(sessionId);
+        // Idle session: view history (read-only). User can resume by
+        // sending a message, which triggers resumeAndSend().
+        viewSavedSession(sessionId, title);
     }
 }
 
@@ -474,7 +493,7 @@ function watchSession(sessionId, title) {
 }
 
 function handleWatchHistory(payload) {
-    if (payload.session_name !== state._watchingSession) return;
+    if (payload.session_name !== state._watchingSession && payload.session_name !== state._viewingSession) return;
     const container = document.getElementById('chat-messages');
     container.innerHTML = '';
     (payload.messages || []).filter(m => m.content && m.content.trim()).forEach(msg => {
@@ -503,6 +522,43 @@ function forkSession(sessionId) {
     document.getElementById('chat-input').placeholder = 'Send a message...';
     document.getElementById('share-btn').classList.remove('hidden');
     document.getElementById('fork-btn').classList.add('hidden');
+}
+
+function viewSavedSession(sessionId, title) {
+    state.activeSession = null;
+    state.selectedPR = null;
+    state.selectedRepo = null;
+    state._watchingSession = null;
+    state._viewingSession = sessionId;
+    state.renderedMessageCount = 0;
+    renderSessionList();
+    renderPRs();
+    renderRepos();
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('pr-detail-view').classList.add('hidden');
+    document.getElementById('repo-detail-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.remove('hidden');
+
+    document.getElementById('chat-session-name').textContent = title.length > 30 ? title.substring(0, 27) + '...' : title;
+    document.getElementById('chat-session-model').textContent = 'saved';
+    const statusEl = document.getElementById('chat-session-status');
+    statusEl.className = 'status-badge idle';
+    statusEl.textContent = 'idle';
+
+    // Input is enabled — sending a message will resume the session.
+    document.getElementById('chat-input').disabled = false;
+    document.getElementById('chat-input').placeholder = 'Send a message to resume this session...';
+    document.getElementById('share-btn').classList.add('hidden');
+    document.getElementById('fork-btn').classList.remove('hidden');
+
+    document.getElementById('chat-messages').innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Loading session history...</div>';
+
+    // Load history via watch_session (reuse same mechanism, just no tailing for idle).
+    send('watch_session', { session_id: sessionId });
+
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+    }
 }
 
 function resumePersistedSession(sessionId) {
@@ -1443,7 +1499,30 @@ function handleCreateSession(e) {
 function sendMessage() {
     const input = document.getElementById('chat-input');
     const prompt = input.value.trim();
-    if (!prompt || !state.activeSession) return;
+    if (!prompt) return;
+
+    // If viewing a saved session, resume it first then send.
+    if (state._viewingSession && !state.activeSession) {
+        const sessionId = state._viewingSession;
+        state._viewingSession = null;
+        state._pendingResume = null;
+        // Resume via SDK, then send the message.
+        const displayName = document.getElementById('chat-session-name').textContent;
+        const name = displayName.length > 40 ? displayName.substring(0, 37) + '...' : displayName;
+        state._pendingResumePrompt = prompt;
+        state._pendingResumeName = name;
+        send('resume_session', { session_id: sessionId, display_name: name });
+        appendPendingMessage(prompt, true);
+        input.value = '';
+        input.style.height = 'auto';
+        document.getElementById('send-btn').disabled = true;
+        document.getElementById('chat-input').placeholder = 'Send a message...';
+        document.getElementById('fork-btn').classList.add('hidden');
+        document.getElementById('share-btn').classList.remove('hidden');
+        return;
+    }
+
+    if (!state.activeSession) return;
     // Clear error state so the session can recover on retry.
     const s = state.sessions.find(s => s.name === state.activeSession);
     if (s && s.state === 'error') {

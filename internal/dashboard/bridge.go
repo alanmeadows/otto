@@ -237,6 +237,59 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 	case MsgGetPersistedSessions:
 		b.sendPersistedSessions(client)
 
+	case MsgWatchSession:
+		var p WatchSessionPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		// Send existing history.
+		history, err := b.manager.ReadSessionEvents(p.SessionID)
+		if err != nil {
+			slog.Warn("watch session: failed to read events", "id", p.SessionID, "error", err)
+			return
+		}
+		msgs := make([]MessageSummary, 0, len(history))
+		for _, m := range history {
+			msgs = append(msgs, MessageSummary{Role: m.Role, Content: m.Content, Timestamp: m.Timestamp})
+		}
+		b.sendTo(client, MsgWatchHistory, SessionHistoryPayload{
+			SessionName: p.SessionID,
+			Messages:    msgs,
+		})
+		// Start tailing for new events in background.
+		go func() {
+			if err := b.manager.WatchSession(client.ctx, p.SessionID, func(msg copilot.ChatMessage) {
+				b.sendTo(client, MsgWatchEvent, ContentDeltaPayload{
+					SessionName: p.SessionID,
+					Content:     msg.Role + ": " + msg.Content,
+				})
+			}); err != nil {
+				slog.Debug("watch session ended", "id", p.SessionID, "error", err)
+			}
+		}()
+
+	case MsgForkSession:
+		var p ForkSessionPayload
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		go func() {
+			name, err := b.manager.ForkSession(ctx, p.SessionID, p.Model)
+			if err != nil {
+				slog.Warn("fork session failed", "id", p.SessionID, "error", err)
+				b.sendTo(client, MsgSessionError, ErrorPayload{
+					Message: "Fork failed: " + err.Error(),
+				})
+				return
+			}
+			b.broadcastSessionsList()
+			// Auto-select the forked session.
+			b.sendTo(client, MsgSessionsList, SessionsListPayload{
+				Sessions:      b.listSessionSummaries(),
+				ActiveSession: name,
+			})
+		}()
+
 	case MsgListWorktrees:
 		if b.onListWorktrees != nil {
 			wts := b.onListWorktrees()
@@ -449,6 +502,14 @@ func (b *Bridge) broadcastAllowedUsers() {
 }
 
 func (b *Bridge) broadcastSessionsList() {
+	summaries := b.listSessionSummaries()
+	b.broadcast(MsgSessionsList, SessionsListPayload{
+		Sessions:      summaries,
+		ActiveSession: b.manager.ActiveSessionName(),
+	})
+}
+
+func (b *Bridge) listSessionSummaries() []SessionSummary {
 	sessions := b.manager.ListSessions()
 	summaries := make([]SessionSummary, len(sessions))
 	for i, s := range sessions {
@@ -464,10 +525,7 @@ func (b *Bridge) broadcastSessionsList() {
 			State:        string(s.State),
 		}
 	}
-	b.broadcast(MsgSessionsList, SessionsListPayload{
-		Sessions:      summaries,
-		ActiveSession: b.manager.ActiveSessionName(),
-	})
+	return summaries
 }
 
 func (b *Bridge) broadcast(msgType string, payload any) {

@@ -586,6 +586,207 @@ type SessionSearchResult struct {
 	UpdatedAt string `json:"updated_at"`
 }
 
+// ReadSessionEvents parses events.jsonl for a persisted session and returns
+// the conversation as chat messages (user + assistant only).
+func (m *Manager) ReadSessionEvents(sessionID string) ([]ChatMessage, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	eventsPath := filepath.Join(home, ".copilot", "session-state", sessionID, "events.jsonl")
+	return parseEventsFile(eventsPath)
+}
+
+// WatchSession tails events.jsonl for a persisted session and sends new
+// chat messages to the callback as they appear. Blocks until ctx is cancelled.
+func (m *Manager) WatchSession(ctx context.Context, sessionID string, onMessage func(ChatMessage)) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	eventsPath := filepath.Join(home, ".copilot", "session-state", sessionID, "events.jsonl")
+
+	f, err := os.Open(eventsPath)
+	if err != nil {
+		return fmt.Errorf("opening events file: %w", err)
+	}
+	defer f.Close()
+
+	// Seek to end — only watch new events.
+	if _, err := f.Seek(0, 2); err != nil {
+		return fmt.Errorf("seeking to end: %w", err)
+	}
+
+	decoder := json.NewDecoder(f)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+			for decoder.More() {
+				var raw eventRecord
+				if err := decoder.Decode(&raw); err != nil {
+					break
+				}
+				if msg, ok := eventToMessage(raw); ok {
+					onMessage(msg)
+				}
+			}
+		}
+	}
+}
+
+// ForkSession creates a new session seeded with the conversation history
+// from an existing persisted session's events.jsonl. Returns the new session name.
+func (m *Manager) ForkSession(ctx context.Context, sessionID, model string) (string, error) {
+	// Read history from the source session.
+	history, err := m.ReadSessionEvents(sessionID)
+	if err != nil {
+		return "", fmt.Errorf("reading source session: %w", err)
+	}
+
+	// Get the source session summary for the fork name.
+	home, _ := os.UserHomeDir()
+	summary := sessionID[:8]
+	if meta := readWorkspaceYAML(filepath.Join(home, ".copilot", "session-state", sessionID)); meta != nil {
+		if meta.summary != "" {
+			summary = meta.summary
+			if len(summary) > 30 {
+				summary = summary[:27] + "..."
+			}
+		}
+	}
+
+	forkName := "fork: " + summary
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if !m.started {
+		return "", fmt.Errorf("manager not started")
+	}
+	// Deduplicate name.
+	name := forkName
+	for i := 2; ; i++ {
+		if _, exists := m.sessions[name]; !exists {
+			break
+		}
+		name = fmt.Sprintf("%s (%d)", forkName, i)
+	}
+
+	if model == "" {
+		model = "claude-opus-4.6"
+	}
+
+	cfg := &sdk.SessionConfig{
+		Model:               model,
+		Streaming:           true,
+		OnPermissionRequest: sdk.PermissionHandler.ApproveAll,
+	}
+	if mcpServers := loadMCPConfig(); mcpServers != nil {
+		cfg.MCPServers = mcpServers
+	}
+
+	sdkSession, err := m.client.CreateSession(ctx, cfg)
+	if err != nil {
+		return "", fmt.Errorf("creating fork session: %w", err)
+	}
+
+	// Build a context summary from the conversation history.
+	var contextBuf strings.Builder
+	contextBuf.WriteString("You are continuing a conversation that was started in another session. Here is the conversation history for context:\n\n")
+	for _, msg := range history {
+		if msg.Role == "user" {
+			contextBuf.WriteString("**User:** " + msg.Content + "\n\n")
+		} else if msg.Role == "assistant" && msg.Content != "" {
+			content := msg.Content
+			if len(content) > 500 {
+				content = content[:497] + "..."
+			}
+			contextBuf.WriteString("**Assistant:** " + content + "\n\n")
+		}
+	}
+	contextBuf.WriteString("\n---\nThe conversation above is history from the original session. You are now in a forked session. Continue from where it left off. Await the user's next message.")
+
+	// Send context as the first message.
+	_, err = sdkSession.Send(ctx, sdk.MessageOptions{
+		Prompt: contextBuf.String(),
+	})
+	if err != nil {
+		slog.Warn("failed to seed fork with history", "error", err)
+	}
+
+	s := newSession(name, model, sdkSession, "")
+	s.onEvent = m.onEvent
+	// Pre-populate the local history so the UI shows the source conversation.
+	s.mu.Lock()
+	s.history = make([]ChatMessage, len(history))
+	copy(s.history, history)
+	s.mu.Unlock()
+
+	m.sessions[name] = s
+	if m.activeSession == "" {
+		m.activeSession = name
+	}
+
+	slog.Info("session forked", "name", name, "source_session", sessionID, "history_messages", len(history))
+	return name, nil
+}
+
+// eventRecord is a single line from events.jsonl.
+type eventRecord struct {
+	Type      string          `json:"type"`
+	Data      json.RawMessage `json:"data"`
+	Timestamp string          `json:"timestamp"`
+}
+
+// parseEventsFile reads events.jsonl and returns user+assistant messages.
+func parseEventsFile(path string) ([]ChatMessage, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+
+	var messages []ChatMessage
+	decoder := json.NewDecoder(f)
+	for decoder.More() {
+		var raw eventRecord
+		if err := decoder.Decode(&raw); err != nil {
+			continue
+		}
+		if msg, ok := eventToMessage(raw); ok {
+			messages = append(messages, msg)
+		}
+	}
+	return messages, nil
+}
+
+// eventToMessage converts a single event record to a ChatMessage, if applicable.
+func eventToMessage(raw eventRecord) (ChatMessage, bool) {
+	ts, _ := time.Parse(time.RFC3339Nano, raw.Timestamp)
+	switch raw.Type {
+	case "user.message":
+		var data struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(raw.Data, &data) == nil && data.Content != "" {
+			return ChatMessage{Role: "user", Content: data.Content, Timestamp: ts}, true
+		}
+	case "assistant.message":
+		var data struct {
+			Content string `json:"content"`
+		}
+		if json.Unmarshal(raw.Data, &data) == nil && data.Content != "" {
+			return ChatMessage{Role: "assistant", Content: data.Content, Timestamp: ts}, true
+		}
+	}
+	return ChatMessage{}, false
+}
+
 // SearchSessions performs FTS5 search across session history in session-store.db.
 func (m *Manager) SearchSessions(query string) []SessionSearchResult {
 	home, err := os.UserHomeDir()

@@ -123,6 +123,8 @@ function handleMessage(msg) {
         case 'reasoning_delta': handleReasoningDelta(msg.payload); break;
         case 'user_message': handleUserMessage(msg.payload); break;
         case 'dashboard_config': handleDashboardConfig(msg.payload); break;
+        case 'watch_history': handleWatchHistory(msg.payload); break;
+        case 'watch_event': handleWatchEvent(msg.payload); break;
     }
 }
 
@@ -405,7 +407,7 @@ function renderPersistedSessionList() {
     available.forEach(p => {
         const card = document.createElement('div');
         card.className = 'persisted-card';
-        card.onclick = () => resumePersistedSession(p.session_id);
+        card.onclick = () => handlePersistedSessionClick(p.session_id);
         const shortId = p.session_id.substring(0, 8);
         const summary = p.summary || 'No summary';
         const ago = p.updated_at ? timeAgo(p.updated_at) : '';
@@ -422,10 +424,90 @@ function renderPersistedSessionList() {
     });
 }
 
+function handlePersistedSessionClick(sessionId) {
+    const session = state.persistedSessions.find(p => p.session_id === sessionId);
+    if (!session) return;
+
+    if (session.is_active) {
+        // Active session: open watch mode (read-only live view).
+        watchSession(sessionId, session.summary || sessionId.substring(0, 8));
+    } else {
+        // Idle session: resume it.
+        resumePersistedSession(sessionId);
+    }
+}
+
+function watchSession(sessionId, title) {
+    state.activeSession = null;
+    state.selectedPR = null;
+    state.selectedRepo = null;
+    state._watchingSession = sessionId;
+    renderSessionList();
+    renderPRs();
+    renderRepos();
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('pr-detail-view').classList.add('hidden');
+    document.getElementById('repo-detail-view').classList.add('hidden');
+    document.getElementById('chat-view').classList.remove('hidden');
+
+    // Update header for watch mode.
+    document.getElementById('chat-session-name').textContent = '👁 ' + (title.length > 30 ? title.substring(0, 27) + '...' : title);
+    document.getElementById('chat-session-model').textContent = 'watching';
+    const statusEl = document.getElementById('chat-session-status');
+    statusEl.className = 'status-badge processing';
+    statusEl.textContent = 'live';
+
+    // Show fork button, hide share button, disable input.
+    document.getElementById('share-btn').classList.add('hidden');
+    document.getElementById('fork-btn').classList.remove('hidden');
+    document.getElementById('chat-input').disabled = true;
+    document.getElementById('chat-input').placeholder = 'Watching session (read-only). Fork to interact.';
+    document.getElementById('send-btn').disabled = true;
+
+    document.getElementById('chat-messages').innerHTML = '<div style="color:var(--text-muted);padding:20px;text-align:center">Loading session history...</div>';
+
+    send('watch_session', { session_id: sessionId });
+
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+    }
+}
+
+function handleWatchHistory(payload) {
+    if (payload.session_name !== state._watchingSession) return;
+    const container = document.getElementById('chat-messages');
+    container.innerHTML = '';
+    (payload.messages || []).filter(m => m.content && m.content.trim()).forEach(msg => {
+        appendChatMessage(msg.role, msg.content, false);
+    });
+    state.renderedMessageCount = (payload.messages || []).length;
+    scrollToBottom();
+}
+
+function handleWatchEvent(payload) {
+    if (payload.session_name !== state._watchingSession) return;
+    // Parse "role: content" format from watch events.
+    const colonIdx = payload.content.indexOf(': ');
+    if (colonIdx > 0 && colonIdx < 12) {
+        const role = payload.content.substring(0, colonIdx);
+        const content = payload.content.substring(colonIdx + 2);
+        appendChatMessage(role, content, false);
+        state.renderedMessageCount++;
+    }
+}
+
+function forkSession(sessionId) {
+    send('fork_session', { session_id: sessionId, model: 'claude-opus-4.6' });
+    state._watchingSession = null;
+    document.getElementById('chat-input').disabled = false;
+    document.getElementById('chat-input').placeholder = 'Send a message...';
+    document.getElementById('share-btn').classList.remove('hidden');
+    document.getElementById('fork-btn').classList.add('hidden');
+}
+
 function resumePersistedSession(sessionId) {
     const session = state.persistedSessions.find(p => p.session_id === sessionId);
     const displayName = session?.summary || sessionId.substring(0, 8);
-    // Truncate long names for the sidebar
     const name = displayName.length > 40 ? displayName.substring(0, 37) + '...' : displayName;
     state._pendingResume = name;
     send('resume_session', { session_id: sessionId, display_name: name });
@@ -1306,10 +1388,17 @@ function isRecentlyActive(isoStr) {
 function selectSession(name) {
     state.activeSession = name;
     state.selectedPR = null;
+    state.selectedRepo = null;
+    state._watchingSession = null;
     state.renderedMessageCount = 0;
     state.userScrolledUp = false;
     state.pendingPrompt = null;
     showNewMessagesPill(false);
+    // Restore interactive mode (in case we were watching).
+    document.getElementById('chat-input').disabled = false;
+    document.getElementById('chat-input').placeholder = 'Send a message...';
+    document.getElementById('share-btn').classList.remove('hidden');
+    document.getElementById('fork-btn').classList.add('hidden');
     renderSessionList();
     renderPRs();
     renderRepos();
@@ -1537,6 +1626,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Share button
     document.getElementById('share-btn').addEventListener('click', shareSession);
+
+    // Fork button (watch mode).
+    document.getElementById('fork-btn').addEventListener('click', () => {
+        if (state._watchingSession) forkSession(state._watchingSession);
+    });
 
     // Tunnel badge — click to copy URL
     document.getElementById('tunnel-status').addEventListener('click', () => {

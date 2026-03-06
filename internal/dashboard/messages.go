@@ -48,6 +48,8 @@ const (
 	MsgPersistedSessionsList = "persisted_sessions_list"
 	MsgUserMessage          = "user_message"
 	MsgDashboardConfig      = "dashboard_config"
+	MsgWatchHistory         = "watch_history"
+	MsgWatchEvent           = "watch_event"
 )
 
 // Client → Server message types.
@@ -68,6 +70,8 @@ const (
 	MsgGetAllowedUsers      = "get_allowed_users"
 	MsgRestartServer        = "restart_server"
 	MsgUpgradeServer        = "upgrade_server"
+	MsgWatchSession         = "watch_session"
+	MsgForkSession          = "fork_session"
 )
 
 // Server → Client
@@ -202,6 +206,15 @@ type ResumeSessionPayload struct {
 
 type CloseSessionPayload struct {
 	SessionName string `json:"session_name"`
+}
+
+type WatchSessionPayload struct {
+	SessionID string `json:"session_id"`
+}
+
+type ForkSessionPayload struct {
+	SessionID string `json:"session_id"`
+	Model     string `json:"model"`
 }
 
 type SetTunnelConfigPayload struct {

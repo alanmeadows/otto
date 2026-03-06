@@ -178,6 +178,8 @@ func TestIsInfraFailure(t *testing.T) {
 		{"fallback retry-resolve phrasing", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe failure points to a transient infrastructure issue in the Windows build container. **A retry is likely to resolve this.**", true},
 		{"fallback transient build environment with retry", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nBoth failures are characteristic of a **transient build environment issue**: the PowerShell unit test runner crashed or errored in a way unrelated to the PR's code changes.\n\n### Recommendation\n\n**Retry the build.** No code changes are indicated.", true},
 		{"fallback transient environment without structural marker", "The failure is a transient environment glitch.\n\nRetry recommended.", false},
+		{"fallback flaky test environment with recommended retry", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Failed Tasks\n\n1. **Run PowerShell Scriptlets Unit Tests** — PowerShell exited with code '1' via Write-Error.\n\n### Root Cause\n\nThe PowerShell unit test runner failed with a non-specific WriteErrorException — this points to a **flaky test environment or transient test harness issue** rather than a code defect. A retry is the recommended next step.", true},
+		{"fallback flaky environment without transient keyword", "## Failure Summary\n\n**Build:** Azlocal-Overlay-PullRequest\n\n### Root Cause\n\nThe test failures are consistent with a **flaky test environment** issue. No code changes in this PR are implicated.\n\n### Recommendation\n\n**Retry the build.**", true},
 	}
 
 	for _, tt := range tests {

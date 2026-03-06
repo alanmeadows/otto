@@ -230,6 +230,67 @@ Both config files use [JSONC](https://code.visualstudio.com/docs/languages/json#
 
 Use `otto config show` to inspect the merged result and `otto config set <key> <value>` to write values to the repo-local file.
 
+### Example Configs
+
+**User config** (`~/.config/otto/otto.jsonc`) — personal settings shared across all repos:
+
+```jsonc
+{
+  // Server settings
+  "server": {
+    "source_dir": "~/clones/otto",       // for upgrade --channel main
+    "upgrade_channel": "main"
+  },
+
+  // PR autopilot
+  "pr": {
+    "default_provider": "ado",
+    "max_fix_attempts": 5,
+    "providers": {
+      "ado": {
+        // Entra ID auth via az cli — no PAT needed
+        "organization": "myorg",
+        "project": "MyProject",
+        "auto_complete": true,
+        "merlinbot": true,
+        "create_work_item": true,
+        "work_item_area_path": "MyProject\\Team\\Area"
+      }
+    }
+  },
+
+  // Tracked repositories
+  "repos": [
+    {
+      "name": "my-project",
+      "primary_dir": "/home/user/repos/my-project",
+      "worktree_dir": "/home/user/repos/my-project.worktree",
+      "git_strategy": "worktree",
+      "branch_template": "users/myalias/{{.Name}}"
+    }
+  ]
+}
+```
+
+**Repo config** (`.otto/otto.jsonc`) — repo-specific overrides committed with the project:
+
+```jsonc
+{
+  // Dashboard & tunnel settings for this project
+  "dashboard": {
+    "copilot_server": "localhost:4321",
+    "tunnel_id": "myname-otto",
+    "owner_nickname": "myname",
+    "tunnel_access": "tenant"
+  },
+
+  // Teams notifications for PR events
+  "notifications": {
+    "teams_webhook_url": "https://your-power-automate-webhook-url"
+  }
+}
+```
+
 ### Configuration Reference
 
 | Key | Type | Default | Description |

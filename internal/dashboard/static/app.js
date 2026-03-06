@@ -6,7 +6,9 @@ const state = {
     sessions: [],
     persistedSessions: [],
     trackedPRs: [],
+    trackedRepos: [],
     selectedPR: null,
+    selectedRepo: null,
     activeSession: null,
     reconnectDelay: 1000,
     reconnectTimer: null,
@@ -39,6 +41,7 @@ function connect() {
             send('get_history', { session_name: state.activeSession });
         }
         fetchPRs();
+        fetchRepos();
         // Refresh PRs every 60 seconds.
         if (state.prPollTimer) clearInterval(state.prPollTimer);
         state.prPollTimer = setInterval(fetchPRs, 60000);
@@ -504,12 +507,15 @@ function renderPRs() {
 
 function selectPR(id) {
     state.selectedPR = id;
+    state.selectedRepo = null;
     state.activeSession = null;
     renderSessionList();
     renderPRs();
+    renderRepos();
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('chat-view').classList.add('hidden');
     document.getElementById('pr-detail-view').classList.remove('hidden');
+    document.getElementById('repo-detail-view').classList.add('hidden');
     document.getElementById('pr-detail-body').innerHTML = '<div style="color:var(--text-muted);padding:20px">Loading…</div>';
 
     const keyParam = new URLSearchParams(location.search).get('key');
@@ -738,6 +744,167 @@ function prWaitingOn(pr) {
     if (!pr.feedback_done) parts.push('feedback');
     if (!pr.merlinbot_done) parts.push('merlinbot');
     return parts.length > 0 ? parts.join(', ') : '';
+}
+
+// --- Repositories ---
+
+function fetchRepos() {
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/repos' + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url)
+        .then(r => r.json())
+        .then(repos => {
+            state.trackedRepos = repos || [];
+            renderRepos();
+        })
+        .catch(() => {
+            state.trackedRepos = [];
+            renderRepos();
+        });
+}
+
+function renderRepos() {
+    const container = document.getElementById('repo-list');
+    if (!state.trackedRepos || state.trackedRepos.length === 0) {
+        container.innerHTML = '<div class="empty-hint" style="color:var(--text-muted);font-size:0.85em;padding:0.3em 0.5em">No repositories</div>';
+        return;
+    }
+    container.innerHTML = '';
+    for (const repo of state.trackedRepos) {
+        const el = document.createElement('div');
+        el.className = 'repo-item' + (state.selectedRepo === repo.name ? ' active' : '');
+        const strategyIcon = repo.git_strategy === 'worktree' ? '🌿' : (repo.git_strategy === 'branch' ? '🔀' : '👁️');
+        el.innerHTML = `
+            <div class="repo-item-header">
+                <span class="repo-status-icon">${strategyIcon}</span>
+                <span class="repo-name">${escapeHtml(repo.name)}</span>
+            </div>
+            <div class="repo-meta">
+                <span>${escapeHtml(repo.primary_dir.replace(/^\/home\/[^/]+\//, '~/'))}</span>
+            </div>`;
+        el.addEventListener('click', () => selectRepo(repo.name));
+        container.appendChild(el);
+    }
+}
+
+function selectRepo(name) {
+    state.selectedRepo = name;
+    state.selectedPR = null;
+    state.activeSession = null;
+    renderSessionList();
+    renderPRs();
+    renderRepos();
+    document.getElementById('empty-state').classList.add('hidden');
+    document.getElementById('chat-view').classList.add('hidden');
+    document.getElementById('pr-detail-view').classList.add('hidden');
+    document.getElementById('repo-detail-view').classList.remove('hidden');
+
+    const repo = state.trackedRepos.find(r => r.name === name);
+    if (repo) renderRepoDetail(repo);
+
+    if (window.innerWidth <= 768) {
+        document.getElementById('sidebar').classList.remove('open');
+    }
+}
+
+function renderRepoDetail(repo) {
+    document.getElementById('repo-detail-name').textContent = repo.name;
+    document.getElementById('repo-detail-path').textContent = repo.primary_dir;
+
+    const fields = document.getElementById('repo-detail-fields');
+    const strategy = repo.git_strategy || 'worktree';
+    const strategyLabel = { worktree: 'Worktree (recommended)', branch: 'Branch', 'hands-off': 'Hands-off (read only)' };
+
+    fields.innerHTML = `
+        <div class="repo-field-group">
+            <div class="repo-field">
+                <label>Primary Directory</label>
+                <input id="repo-edit-dir" type="text" value="${escapeHtml(repo.primary_dir)}" class="repo-field-input">
+            </div>
+            <div class="repo-field">
+                <label>Worktree Directory</label>
+                <input id="repo-edit-wt" type="text" value="${escapeHtml(repo.worktree_dir || '')}" placeholder="(optional)" class="repo-field-input">
+            </div>
+            <div class="repo-field">
+                <label>Git Strategy</label>
+                <select id="repo-edit-strategy" class="repo-field-input">
+                    <option value="worktree"${strategy === 'worktree' ? ' selected' : ''}>Worktree</option>
+                    <option value="branch"${strategy === 'branch' ? ' selected' : ''}>Branch</option>
+                    <option value="hands-off"${strategy === 'hands-off' ? ' selected' : ''}>Hands-off</option>
+                </select>
+            </div>
+            <div class="repo-field">
+                <label>Branch Template</label>
+                <input id="repo-edit-branch" type="text" value="${escapeHtml(repo.branch_template || 'otto/{{.Name}}')}" class="repo-field-input">
+            </div>
+            <div style="margin-top:12px;display:flex;justify-content:flex-end">
+                <button class="btn btn-primary btn-sm" onclick="saveRepoEdits('${escapeHtml(repo.name)}')">Save Changes</button>
+            </div>
+        </div>`;
+}
+
+function saveRepoEdits(name) {
+    const updates = {
+        primary_dir: document.getElementById('repo-edit-dir').value,
+        worktree_dir: document.getElementById('repo-edit-wt').value,
+        git_strategy: document.getElementById('repo-edit-strategy').value,
+        branch_template: document.getElementById('repo-edit-branch').value,
+    };
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/repos/' + encodeURIComponent(name) + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+    })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        return r.json();
+    })
+    .then(() => {
+        fetchRepos();
+        send('list_worktrees', {});
+    })
+    .catch(err => alert('Failed to save: ' + err.message));
+}
+
+function removeRepo(name) {
+    if (!confirm('Remove repository "' + name + '"?')) return;
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/repos/' + encodeURIComponent(name) + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, { method: 'DELETE' })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        state.selectedRepo = null;
+        document.getElementById('repo-detail-view').classList.add('hidden');
+        document.getElementById('empty-state').classList.remove('hidden');
+        fetchRepos();
+        send('list_worktrees', {});
+    })
+    .catch(err => alert('Failed to remove: ' + err.message));
+}
+
+function showAddRepoDialog() {
+    var name = prompt('Repository name:');
+    if (!name) return;
+    var dir = prompt('Path to repository:', '/home/' + (state.ownerNickname || 'user') + '/repos/' + name);
+    if (!dir) return;
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/repos' + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, primary_dir: dir }),
+    })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        return r.json();
+    })
+    .then(() => {
+        fetchRepos();
+        send('list_worktrees', {});
+    })
+    .catch(err => alert('Failed to add repo: ' + err.message));
 }
 
 // --- Session Search ---
@@ -1107,9 +1274,11 @@ function selectSession(name) {
     showNewMessagesPill(false);
     renderSessionList();
     renderPRs();
+    renderRepos();
     document.getElementById('empty-state').classList.add('hidden');
     document.getElementById('chat-view').classList.remove('hidden');
     document.getElementById('pr-detail-view').classList.add('hidden');
+    document.getElementById('repo-detail-view').classList.add('hidden');
     document.getElementById('chat-messages').innerHTML = '';
     updateChatHeader();
     showActivity(false);
@@ -1297,6 +1466,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // New session button
     document.getElementById('new-session-btn').addEventListener('click', showNewSessionDialog);
+
+    // Repo management
+    document.getElementById('add-repo-btn').addEventListener('click', showAddRepoDialog);
+    document.getElementById('repo-remove-btn').addEventListener('click', () => {
+        if (state.selectedRepo) removeRepo(state.selectedRepo);
+    });
 
     // Workdir search picker
     const workdirSearch = document.getElementById('session-workdir-search');

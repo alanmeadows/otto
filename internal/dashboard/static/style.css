@@ -864,3 +864,97 @@ body {
 @media (max-width: 768px) {
     .pr-status-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Repo list */
+.repo-item {
+    padding: 8px 12px;
+    border-radius: var(--radius);
+    margin-bottom: 4px;
+    transition: background 0.15s;
+    cursor: pointer;
+}
+.repo-item:hover { background: var(--bg-hover); }
+.repo-item.active { background: var(--bg-tertiary); border: 1px solid var(--accent); }
+.repo-item-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+.repo-status-icon { flex-shrink: 0; font-size: 12px; }
+.repo-name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.repo-meta {
+    margin-top: 3px;
+    font-size: 11px;
+    color: var(--text-muted);
+    padding-left: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Repo detail view */
+#repo-detail-view {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+#repo-detail-header {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-secondary);
+}
+.repo-detail-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.repo-detail-title-row h3 {
+    flex: 1;
+    margin: 0;
+    font-size: 16px;
+}
+.repo-detail-icon { font-size: 20px; }
+.repo-detail-path {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-family: 'Fira Code', 'Cascadia Code', monospace;
+    margin-top: 4px;
+}
+.repo-detail-content {
+    flex: 1;
+    overflow-y: auto;
+    padding: 20px;
+}
+.repo-field-group {
+    max-width: 500px;
+}
+.repo-field {
+    margin-bottom: 14px;
+}
+.repo-field label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.repo-field-input {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    font-family: 'Fira Code', 'Cascadia Code', monospace;
+}
+.repo-field-input:focus { border-color: var(--accent); }

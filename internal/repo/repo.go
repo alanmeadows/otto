@@ -93,6 +93,11 @@ func (m *Manager) FindByCWD(cfg *config.Config) (*config.RepoConfig, error) {
 	return m.FindByRemoteURL(cfg, remoteURL)
 }
 
+// WriteConfig persists the repo list to the user config file.
+func (m *Manager) WriteConfig(cfg *config.Config) error {
+	return m.writeUserConfig(cfg)
+}
+
 // writeUserConfig writes the repo list to the user config file.
 func (m *Manager) writeUserConfig(cfg *config.Config) error {
 	if err := os.MkdirAll(m.configDir, 0755); err != nil {

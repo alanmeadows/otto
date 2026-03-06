@@ -277,6 +277,8 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/prs/{id}", s.guardDashboard(s.handleGetPR))
 	mux.HandleFunc("GET /api/repos", s.guardDashboard(s.handleListRepos))
 	mux.HandleFunc("POST /api/repos", s.guardDashboard(s.handleAddRepo))
+	mux.HandleFunc("DELETE /api/repos/{name}", s.guardDashboard(s.handleRemoveRepo))
+	mux.HandleFunc("PATCH /api/repos/{name}", s.guardDashboard(s.handleUpdateRepo))
 	mux.HandleFunc("GET /api/tunnel/status", s.guardDashboard(s.handleTunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/start", s.guardDashboard(s.handleStartTunnel))
 	mux.HandleFunc("POST /api/tunnel/stop", s.guardDashboard(s.handleStopTunnel))
@@ -425,6 +427,89 @@ func (s *Server) handleAddRepo(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, map[string]string{"status": "added", "name": req.Name})
+}
+
+func (s *Server) handleRemoveRepo(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		http.Error(w, "cannot determine config dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mgr := repo.NewManager(configDir)
+	if err := mgr.Remove(s.cfg, name); err != nil {
+		http.Error(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	slog.Info("repository removed via dashboard", "name", name)
+	s.bridge.BroadcastWorktrees(s.listWorktrees())
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) handleUpdateRepo(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		http.Error(w, "name is required", http.StatusBadRequest)
+		return
+	}
+
+	var updates struct {
+		PrimaryDir     *string `json:"primary_dir,omitempty"`
+		WorktreeDir    *string `json:"worktree_dir,omitempty"`
+		GitStrategy    *string `json:"git_strategy,omitempty"`
+		BranchTemplate *string `json:"branch_template,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&updates); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Find and update the repo in config.
+	found := false
+	for i, r := range s.cfg.Repos {
+		if r.Name == name {
+			if updates.PrimaryDir != nil {
+				s.cfg.Repos[i].PrimaryDir = *updates.PrimaryDir
+			}
+			if updates.WorktreeDir != nil {
+				s.cfg.Repos[i].WorktreeDir = *updates.WorktreeDir
+			}
+			if updates.GitStrategy != nil {
+				s.cfg.Repos[i].GitStrategy = config.GitStrategy(*updates.GitStrategy)
+			}
+			if updates.BranchTemplate != nil {
+				s.cfg.Repos[i].BranchTemplate = *updates.BranchTemplate
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		http.Error(w, "repository not found", http.StatusNotFound)
+		return
+	}
+
+	// Persist to user config.
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		http.Error(w, "cannot determine config dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mgr := repo.NewManager(configDir)
+	if err := mgr.WriteConfig(s.cfg); err != nil {
+		http.Error(w, "failed to save config: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	slog.Info("repository updated via dashboard", "name", name)
+	s.bridge.BroadcastWorktrees(s.listWorktrees())
+	writeJSON(w, map[string]string{"status": "updated", "name": name})
 }
 
 func (s *Server) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {

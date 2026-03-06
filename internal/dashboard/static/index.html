@@ -50,6 +50,15 @@
                 </div>
                 <div class="sidebar-section">
                     <div class="sidebar-header">
+                        <h2>Repositories</h2>
+                        <button id="add-repo-btn" class="icon-btn" title="Add repository">+</button>
+                    </div>
+                    <div id="repo-list">
+                        <div class="empty-hint" style="color:var(--text-muted);font-size:0.85em;padding:0.3em 0.5em">Loading…</div>
+                    </div>
+                </div>
+                <div class="sidebar-section">
+                    <div class="sidebar-header">
                         <h2>Tunnel</h2>
                     </div>
                     <div id="tunnel-controls">
@@ -119,6 +128,20 @@
                         <div id="pr-detail-progress" class="pr-detail-progress"></div>
                         <div id="pr-detail-timeline" class="pr-detail-timeline"></div>
                         <div id="pr-detail-body" class="pr-detail-body"></div>
+                    </div>
+                </div>
+                <!-- Repo detail view (hidden by default) -->
+                <div id="repo-detail-view" class="hidden">
+                    <div id="repo-detail-header">
+                        <div class="repo-detail-title-row">
+                            <span class="repo-detail-icon">📂</span>
+                            <h3 id="repo-detail-name"></h3>
+                            <button id="repo-remove-btn" class="btn btn-sm btn-danger" title="Remove repository">Remove</button>
+                        </div>
+                        <div id="repo-detail-path" class="repo-detail-path"></div>
+                    </div>
+                    <div id="repo-detail-content" class="repo-detail-content">
+                        <div id="repo-detail-fields"></div>
                     </div>
                 </div>
             </main>

@@ -58,7 +58,12 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 		slog.Info("PR monitoring disabled via --no-pr-monitoring")
 	} else {
 		slog.Info("starting PR monitoring", "model", cfg.Models.Primary, "interval", cfg.PR.Providers)
-		llmClient := llm.NewCopilotClient(cfg.Models.Primary)
+		var llmClient *llm.CopilotClient
+		if cfg.Dashboard.CopilotServer != "" {
+			llmClient = llm.NewCopilotClientWithServer(cfg.Models.Primary, cfg.Dashboard.CopilotServer)
+		} else {
+			llmClient = llm.NewCopilotClient(cfg.Models.Primary)
+		}
 		if err := llmClient.Start(ctx); err != nil {
 			slog.Warn("Copilot LLM client not available, PR monitoring disabled", "error", err)
 		} else {

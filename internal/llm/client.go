@@ -12,11 +12,12 @@ import (
 
 // CopilotClient wraps the GitHub Copilot SDK to implement Client.
 type CopilotClient struct {
-	sdk      *sdk.Client
-	model    string
-	sessions map[string]*sdk.Session
-	mu       sync.Mutex
-	started  bool
+	sdk       *sdk.Client
+	model     string
+	serverURL string // if set, connect to shared copilot server instead of spawning
+	sessions  map[string]*sdk.Session
+	mu        sync.Mutex
+	started   bool
 }
 
 // NewCopilotClient creates a CopilotClient that uses the given model for all sessions.
@@ -27,6 +28,15 @@ func NewCopilotClient(model string) *CopilotClient {
 	}
 }
 
+// NewCopilotClientWithServer creates a CopilotClient that connects to a shared server.
+func NewCopilotClientWithServer(model, serverURL string) *CopilotClient {
+	return &CopilotClient{
+		model:     model,
+		serverURL: serverURL,
+		sessions:  make(map[string]*sdk.Session),
+	}
+}
+
 // Start initializes the underlying Copilot SDK client.
 func (c *CopilotClient) Start(ctx context.Context) error {
 	c.mu.Lock()
@@ -34,7 +44,15 @@ func (c *CopilotClient) Start(ctx context.Context) error {
 	if c.started {
 		return nil
 	}
-	c.sdk = sdk.NewClient(nil)
+	var opts *sdk.ClientOptions
+	if c.serverURL != "" {
+		opts = &sdk.ClientOptions{
+			CLIUrl:    c.serverURL,
+			AutoStart: sdk.Bool(false),
+		}
+		slog.Info("LLM client connecting to shared copilot server", "server", c.serverURL)
+	}
+	c.sdk = sdk.NewClient(opts)
 	if err := c.sdk.Start(ctx); err != nil {
 		return fmt.Errorf("starting copilot SDK: %w", err)
 	}

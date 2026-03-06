@@ -94,21 +94,9 @@ type forkResult struct {
 	tunnelEnabled    bool
 }
 
-// expandHome replaces a leading "~/" in a path with the user's home directory.
-// If the path does not start with "~/" or the home directory cannot be determined,
-// the path is returned unchanged.
+// expandHome is a package-local alias for config.ExpandHome.
 func expandHome(path string) string {
-	if !strings.HasPrefix(path, "~/") && path != "~" {
-		return path
-	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		return path
-	}
-	if path == "~" {
-		return home
-	}
-	return filepath.Join(home, path[2:])
+	return config.ExpandHome(path)
 }
 
 func forkDaemon(port int, logDir string) (*forkResult, error) {

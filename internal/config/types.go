@@ -1,6 +1,28 @@
 package config
 
-import "time"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+)
+
+// ExpandHome replaces a leading "~/" in a path with the user's home directory.
+// If the path does not start with "~/" or the home directory cannot be determined,
+// the path is returned unchanged.
+func ExpandHome(path string) string {
+	if !strings.HasPrefix(path, "~/") && path != "~" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+	if path == "~" {
+		return home
+	}
+	return filepath.Join(home, path[2:])
+}
 
 // Config is the top-level otto configuration.
 type Config struct {

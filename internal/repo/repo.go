@@ -24,6 +24,10 @@ func NewManager(configDir string) *Manager {
 
 // Add validates and appends a repo to the config, writing back to user config.
 func (m *Manager) Add(cfg *config.Config, repo config.RepoConfig) error {
+	// Expand ~ in paths.
+	repo.PrimaryDir = config.ExpandHome(repo.PrimaryDir)
+	repo.WorktreeDir = config.ExpandHome(repo.WorktreeDir)
+
 	// Validate primary dir exists
 	info, err := os.Stat(repo.PrimaryDir)
 	if err != nil {

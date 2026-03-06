@@ -15,6 +15,8 @@ import (
 	sdk "github.com/github/copilot-sdk/go"
 	_ "modernc.org/sqlite"
 	"gopkg.in/yaml.v3"
+
+	"github.com/alanmeadows/otto/internal/config"
 )
 
 // PersistedSession describes a session found in ~/.copilot/session-state/.
@@ -126,6 +128,9 @@ func (m *Manager) CreateSession(ctx context.Context, name, model, workingDir str
 	if _, exists := m.sessions[name]; exists {
 		return fmt.Errorf("session %q already exists", name)
 	}
+
+	// Expand ~ so paths like "~/repos/foo" resolve correctly.
+	workingDir = config.ExpandHome(workingDir)
 
 	cfg := &sdk.SessionConfig{
 		Model:               model,

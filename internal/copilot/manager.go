@@ -3,6 +3,7 @@ package copilot
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -137,6 +138,11 @@ func (m *Manager) CreateSession(ctx context.Context, name, model, workingDir str
 		WorkingDirectory:    workingDir,
 		Streaming:           true,
 		OnPermissionRequest: sdk.PermissionHandler.ApproveAll,
+	}
+
+	// Load MCP servers from ~/.copilot/mcp-config.json for CLI parity.
+	if mcpServers := loadMCPConfig(); mcpServers != nil {
+		cfg.MCPServers = mcpServers
 	}
 
 	sdkSession, err := m.client.CreateSession(ctx, cfg)
@@ -520,6 +526,30 @@ func readWorkspaceYAML(sessionDir string) *workspaceMeta {
 		summary = summary[:idx]
 	}
 	return &workspaceMeta{summary: summary, createdAt: raw.CreatedAt, updatedAt: raw.UpdatedAt}
+}
+
+// loadMCPConfig reads MCP server configuration from ~/.copilot/mcp-config.json.
+// Returns nil if the file doesn't exist or can't be parsed.
+func loadMCPConfig() map[string]sdk.MCPServerConfig {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".copilot", "mcp-config.json"))
+	if err != nil {
+		return nil
+	}
+	var raw struct {
+		MCPServers map[string]sdk.MCPServerConfig `json:"mcpServers"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		slog.Debug("failed to parse mcp-config.json", "error", err)
+		return nil
+	}
+	if len(raw.MCPServers) > 0 {
+		slog.Info("loaded MCP servers from ~/.copilot/mcp-config.json", "count", len(raw.MCPServers))
+	}
+	return raw.MCPServers
 }
 
 // SessionSearchResult represents a single search hit across session history.

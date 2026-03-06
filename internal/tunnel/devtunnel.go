@@ -145,6 +145,9 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 	if !hasBgtask() {
 		return fmt.Errorf("bgtask is required but not installed — install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
 	}
+	if !m.IsInstalled() {
+		return fmt.Errorf("devtunnel is required but not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash")
+	}
 	if m.config.TunnelID == "" {
 		// Auto-create a persistent tunnel if access control is configured.
 		needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != "" || len(m.config.AllowEmails) > 0

@@ -145,6 +145,37 @@ func TestInferPRNone(t *testing.T) {
 	assert.Error(t, err)
 }
 
+func TestIsInfraFailure(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected bool
+	}{
+		{"exact match", "CLASSIFICATION: INFRASTRUCTURE\n\nSome details.", true},
+		{"lowercase", "classification: infrastructure\n\nDetails.", true},
+		{"mixed case", "Classification: Infrastructure\n\nDetails.", true},
+		{"trailing text", "CLASSIFICATION: INFRASTRUCTURE - transient test failure\nDetails.", true},
+		{"markdown bold", "**CLASSIFICATION: INFRASTRUCTURE**\n\nDetails.", true},
+		{"backtick wrapped", "`CLASSIFICATION: INFRASTRUCTURE`\n\nDetails.", true},
+		{"extra whitespace", "CLASSIFICATION:   INFRASTRUCTURE  \nDetails.", true},
+		{"no space after colon", "CLASSIFICATION:INFRASTRUCTURE\nDetails.", true},
+		{"preceded by blank lines", "\n\n\nCLASSIFICATION: INFRASTRUCTURE\nDetails.", true},
+		{"code failure", "CLASSIFICATION: CODE\n\nCompilation error in main.go.", false},
+		{"code lowercase", "classification: code\n\nTest failure.", false},
+		{"no classification", "The build failed because of a network error.", false},
+		{"empty string", "", false},
+		{"preamble then classification", "Here is my analysis:\n\nCLASSIFICATION: INFRASTRUCTURE\n\nDetails.", true},
+		{"markdown heading prefix", "## CLASSIFICATION: INFRASTRUCTURE\n\nDetails.", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isInfraFailure(tt.input)
+			assert.Equal(t, tt.expected, result, "input: %q", tt.input)
+		})
+	}
+}
+
 func TestPRFilename(t *testing.T) {
 	name := prFilename("github", "123")
 	assert.Equal(t, "github__123.md", name)

@@ -662,19 +662,27 @@ Do NOT introduce unnecessary changes beyond resolving the conflicts.`, pr.ID, pr
 }
 
 // isInfraFailure checks whether the Phase 1 diagnosis classifies the failure
-// as an infrastructure issue (not a code bug). It looks for the classification
-// marker on the first line of the LLM response.
+// as an infrastructure issue (not a code bug). It looks for a CLASSIFICATION:
+// marker in the first few lines of the LLM response.
 func isInfraFailure(diagnosis string) bool {
-	// Check the first few lines for the classification marker.
-	for _, line := range strings.SplitN(diagnosis, "\n", 5) {
+	for _, line := range strings.SplitN(diagnosis, "\n", 10) {
 		line = strings.TrimSpace(line)
-		if strings.EqualFold(line, "CLASSIFICATION: INFRASTRUCTURE") {
+		// Strip common markdown formatting characters.
+		line = strings.NewReplacer("*", "", "`", "", "#", "").Replace(line)
+		line = strings.TrimSpace(line)
+
+		upper := strings.ToUpper(line)
+		if !strings.HasPrefix(upper, "CLASSIFICATION:") {
+			continue
+		}
+		// Extract the value after the prefix and normalize.
+		value := strings.TrimSpace(line[len("CLASSIFICATION:"):])
+		value = strings.ToUpper(value)
+		if strings.Contains(value, "INFRASTRUCTURE") {
 			return true
 		}
-		if strings.HasPrefix(strings.ToUpper(line), "CLASSIFICATION:") {
-			// Found a classification line but it's not INFRASTRUCTURE.
-			return false
-		}
+		// Found a classification line but it doesn't say INFRASTRUCTURE.
+		return false
 	}
 	return false
 }

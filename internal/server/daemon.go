@@ -131,8 +131,8 @@ func forkDaemon(port int, logDir string) (*forkResult, error) {
 	logFile := filepath.Join(logDir, "ottod.log")
 
 	// Determine dashboard port for URL output.
-	dashboardEnabled := os.Getenv("OTTO_DASHBOARD") == "1"
-	tunnelEnabled := os.Getenv("OTTO_TUNNEL") == "1"
+	dashboardEnabled := os.Getenv("OTTO_NO_DASHBOARD") != "1"
+	tunnelEnabled := os.Getenv("OTTO_NO_TUNNEL") != "1" && dashboardEnabled
 	dashPort := 4098
 	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
@@ -280,17 +280,18 @@ func runForeground(port int, logDir string) error {
 		cfg = &defaultCfg
 	}
 
-	// Apply dashboard flags from environment (set by CLI before fork).
-	if os.Getenv("OTTO_DASHBOARD") == "1" {
-		cfg.Dashboard.Enabled = true
+	// Apply runtime flags from environment (set by CLI before fork).
+	// Dashboard and tunnel default to enabled; env vars disable them.
+	if os.Getenv("OTTO_NO_DASHBOARD") == "1" {
+		cfg.Dashboard.Enabled = false
 	}
 	if v := os.Getenv("OTTO_DASHBOARD_PORT"); v != "" {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.Dashboard.Port = p
 		}
 	}
-	if os.Getenv("OTTO_TUNNEL") == "1" {
-		cfg.Dashboard.AutoStartTunnel = true
+	if os.Getenv("OTTO_NO_TUNNEL") == "1" {
+		cfg.Dashboard.AutoStartTunnel = false
 	}
 	if os.Getenv("OTTO_NO_PR_MONITORING") == "1" {
 		cfg.Server.NoPRMonitoring = true

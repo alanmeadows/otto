@@ -319,13 +319,10 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `server.source_dir` | string | | Path to otto source for `upgrade --channel main` |
 | `server.upgrade_channel` | string | `release` | Upgrade channel: `release` (go install @latest) or `main` (build from source) |
 | `dashboard.port` | int | `4098` | Dashboard web server port |
-| `dashboard.enabled` | bool | `true` | Enable the Copilot session dashboard |
-| `dashboard.auto_start_tunnel` | bool | `true` | Auto-start Azure DevTunnel on dashboard start |
 | `dashboard.copilot_server` | string | | Connect to shared headless Copilot server (e.g. `localhost:4321`) |
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL across restarts |
 | `dashboard.tunnel_access` | string | | Access mode: `anonymous`, `tenant`, or empty (authenticated) |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
-| `dashboard.tunnel_allow_emails` | string[] | | Specific email addresses to grant tunnel access |
 | `dashboard.owner_email` | string | | Dashboard owner email (auto-detected from tunnel JWT if empty) |
 | `dashboard.owner_nickname` | string | `owner` | Display name for session owner in chat bubbles |
 | `dashboard.allowed_users` | string[] | | Emails allowed full dashboard access |

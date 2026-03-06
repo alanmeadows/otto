@@ -72,8 +72,14 @@ func loadJSONC(path string) (map[string]any, error) {
 }
 
 // mergeIntoConfig marshals the config to a map, deep-merges the source map over it,
-// then unmarshals back to the Config struct.
+// then unmarshals back to the Config struct. Runtime-only fields (json:"-") are
+// preserved across the round-trip.
 func mergeIntoConfig(cfg *Config, src map[string]any) error {
+	// Save runtime-only fields that are excluded from JSON.
+	dashEnabled := cfg.Dashboard.Enabled
+	tunnelEnabled := cfg.Dashboard.AutoStartTunnel
+	noPRMon := cfg.Server.NoPRMonitoring
+
 	// Marshal current config to map
 	cfgBytes, err := json.Marshal(cfg)
 	if err != nil {
@@ -94,7 +100,15 @@ func mergeIntoConfig(cfg *Config, src map[string]any) error {
 	if err != nil {
 		return err
 	}
-	return json.Unmarshal(merged, cfg)
+	if err := json.Unmarshal(merged, cfg); err != nil {
+		return err
+	}
+
+	// Restore runtime-only fields.
+	cfg.Dashboard.Enabled = dashEnabled
+	cfg.Dashboard.AutoStartTunnel = tunnelEnabled
+	cfg.Server.NoPRMonitoring = noPRMon
+	return nil
 }
 
 // findRepoRoot finds the git repository root via git rev-parse.

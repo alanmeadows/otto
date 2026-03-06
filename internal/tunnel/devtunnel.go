@@ -53,7 +53,6 @@ type Config struct {
 TunnelID    string   // persistent tunnel name; empty = ephemeral
 Access      string   // "anonymous", "tenant", or "" (authenticated, the default)
 AllowOrg    string   // GitHub org to allow
-AllowEmails []string // specific emails to allow
 }
 
 // Manager wraps the Azure DevTunnel CLI for hosting and managing tunnels.
@@ -143,11 +142,6 @@ runCmd(findDevtunnel(), "access", "create", tid, "--org", m.config.AllowOrg)
 slog.Info("tunnel access: granted to GitHub org", "org", m.config.AllowOrg)
 }
 
-if len(m.config.AllowEmails) > 0 {
-slog.Info("tunnel access: individual emails require org/tenant membership for DevTunnel auth",
-"emails", m.config.AllowEmails)
-}
-
 return nil
 }
 
@@ -171,7 +165,7 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 	}
 	if m.config.TunnelID == "" {
 		// Auto-create a persistent tunnel if access control is configured.
-		needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != "" || len(m.config.AllowEmails) > 0
+		needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != ""
 		if needsPersistent {
 			m.config.TunnelID = fmt.Sprintf("otto-%s", generateShortID())
 			slog.Info("auto-creating persistent tunnel for access control", "tunnel_id", m.config.TunnelID)

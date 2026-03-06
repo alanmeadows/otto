@@ -62,7 +62,6 @@ func NewServer(cfg *config.Config) *Server {
 		TunnelID:    cfg.Dashboard.TunnelID,
 		Access:      cfg.Dashboard.TunnelAccess,
 		AllowOrg:    cfg.Dashboard.TunnelAllowOrg,
-		AllowEmails: cfg.Dashboard.TunnelAllowEmails,
 	})
 
 	// Generate a dashboard access key.

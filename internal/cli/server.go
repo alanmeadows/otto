@@ -77,29 +77,17 @@ PR polling loop (dashboard-only mode).`,
 		}
 		logDir := appConfig.Server.LogDir
 
-		// Dashboard is enabled by default; --no-dashboard disables it.
-		dashboardEnabled := appConfig.Dashboard.Enabled
+		// Dashboard and tunnel are enabled by default.
+		// --no-dashboard / --no-tunnel disable them.
 		if noDashboardFlag {
-			dashboardEnabled = false
+			os.Setenv("OTTO_NO_DASHBOARD", "1")
 		}
-
-		// Tunnel is enabled by default; --no-tunnel disables it.
-		tunnelEnabled := appConfig.Dashboard.AutoStartTunnel
-		if noTunnelFlag || !dashboardEnabled {
-			tunnelEnabled = false
-		}
-
-		if dashboardEnabled {
-			appConfig.Dashboard.Enabled = true
-			os.Setenv("OTTO_DASHBOARD", "1")
+		if noTunnelFlag || noDashboardFlag {
+			os.Setenv("OTTO_NO_TUNNEL", "1")
 		}
 		if dashboardPortFlag > 0 {
 			appConfig.Dashboard.Port = dashboardPortFlag
 			os.Setenv("OTTO_DASHBOARD_PORT", fmt.Sprintf("%d", dashboardPortFlag))
-		}
-		if tunnelEnabled {
-			appConfig.Dashboard.AutoStartTunnel = true
-			os.Setenv("OTTO_TUNNEL", "1")
 		}
 		if verbose {
 			os.Setenv("OTTO_VERBOSE", "1")

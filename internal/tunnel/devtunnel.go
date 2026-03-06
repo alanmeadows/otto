@@ -164,15 +164,8 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 		return nil
 	}
 	if m.config.TunnelID == "" {
-		// Auto-create a persistent tunnel if access control is configured.
-		needsPersistent := m.config.Access == "tenant" || m.config.AllowOrg != ""
-		if needsPersistent {
-			m.config.TunnelID = fmt.Sprintf("otto-%s", generateShortID())
-			slog.Info("auto-creating persistent tunnel for access control", "tunnel_id", m.config.TunnelID)
-		} else {
-			slog.Warn("tunnel skipped: dashboard.tunnel_id not configured — set with: otto config set dashboard.tunnel_id \"yourname-otto\"")
-			return nil
-		}
+		slog.Warn("tunnel skipped: no tunnel_id configured")
+		return nil
 	}
 
 	// Check if the bgtask tunnel is already running (e.g. Otto restarting).

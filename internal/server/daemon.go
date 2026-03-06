@@ -293,6 +293,9 @@ func runForeground(port int, logDir string) error {
 	if os.Getenv("OTTO_NO_TUNNEL") == "1" {
 		cfg.Dashboard.AutoStartTunnel = false
 	}
+	if v := os.Getenv("OTTO_TUNNEL_ID"); v != "" && cfg.Dashboard.TunnelID == "" {
+		cfg.Dashboard.TunnelID = v
+	}
 	if os.Getenv("OTTO_NO_PR_MONITORING") == "1" {
 		cfg.Server.NoPRMonitoring = true
 	}

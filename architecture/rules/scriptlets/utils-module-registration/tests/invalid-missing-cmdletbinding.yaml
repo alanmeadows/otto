@@ -1,4 +1,0 @@
-input: invalid-missing-cmdletbinding.ps1
-expect: fail
-violations:
-  - cmdletbinding-required

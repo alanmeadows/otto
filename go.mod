@@ -9,7 +9,7 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/coder/websocket v1.8.14
-	github.com/github/copilot-sdk/go v0.1.28
+	github.com/github/copilot-sdk/go v0.1.30
 	github.com/gofri/go-github-ratelimit/v2 v2.0.2
 	github.com/gofrs/flock v0.13.0
 	github.com/google/go-github/v82 v82.0.0
@@ -20,7 +20,7 @@ require (
 	github.com/tidwall/sjson v1.2.5
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.35.0
-	golang.org/x/term v0.39.0
+	golang.org/x/term v0.40.0
 	gopkg.in/yaml.v3 v3.0.1
 	modernc.org/sqlite v1.46.1
 )
@@ -69,7 +69,7 @@ require (
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546 // indirect
 	golang.org/x/sync v0.17.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
+	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.23.0 // indirect
 	gopkg.in/yaml.v2 v2.3.0 // indirect
 	modernc.org/libc v1.67.6 // indirect

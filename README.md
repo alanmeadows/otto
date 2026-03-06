@@ -122,11 +122,16 @@ Otto will now poll the PR and automatically:
 ### 4. Start the dashboard
 
 ```bash
-# Local access
-otto server start --dashboard
+# The dashboard and tunnel auto-start when configured (copilot_server or tunnel_id set).
+# Just start the server:
+otto server start
 
-# Or with remote access via Azure DevTunnel
-otto server start --dashboard --tunnel
+# To disable the dashboard or tunnel explicitly:
+otto server start --no-dashboard
+otto server start --no-tunnel
+
+# Run only the dashboard (skip PR monitoring):
+otto server start --dashboard-only
 ```
 
 Open **http://localhost:4098** in your browser. The dashboard shows:
@@ -202,8 +207,8 @@ Recommended configuration:
 # Persistent tunnel ID — stable URL across restarts
 otto config set dashboard.tunnel_id "yourname-otto"
 
-# Start the dashboard with tunnel
-otto server start --dashboard --tunnel
+# Start the server — dashboard and tunnel auto-enable from config
+otto server start
 ```
 
 On start, otto logs an access URL with an embedded secret key:
@@ -344,24 +349,28 @@ otto                          LLM-powered PR lifecycle manager
 │   ├── remove [id]           Stop tracking a PR
 │   ├── fix [id]              Manually trigger LLM fix
 │   ├── log [id]              Show PR activity log
-│   └── review <url> [guide]  LLM-powered PR review with optional focus guidance
+│   ├── review <url> [guide]  LLM-powered PR review with optional focus guidance
+│   └── submit                Submit the current branch as a PR
 ├── server                    Manage the otto daemon
 │   ├── start                 Start the daemon
-│   │   ├── --dashboard       Enable Copilot session dashboard
-│   │   ├── --tunnel          Auto-start Azure DevTunnel
+│   │   ├── --no-dashboard    Disable Copilot session dashboard
+│   │   ├── --no-tunnel       Disable Azure DevTunnel
+│   │   ├── --dashboard-only  Run only the dashboard (skip PR monitoring)
 │   │   ├── --dashboard-port  Dashboard port (default: 4098)
+│   │   ├── --port            Server port (default: 4097)
 │   │   └── --foreground      Run in foreground
 │   ├── stop                  Stop the daemon
 │   ├── restart               Restart the daemon (via bgtask)
 │   ├── upgrade               Stop, install latest, restart (via bgtask)
 │   │   └── --channel         "release" (go install @latest) or "main" (source)
-│   ├── status                Show daemon status
+│   ├── status                Show daemon status, endpoints, and tunnel URL
 │   ├── logs                  Show daemon log file path
 │   └── install               Install as systemd user service
 ├── repo                      Manage repositories
 │   ├── add [name]            Register a repository
 │   ├── remove <name>         Remove a tracked repository
 │   └── list                  List tracked repositories
+├── worktree                  Manage git worktrees
 ├── config                    Manage configuration
 │   ├── show [--json]         Show merged configuration
 │   └── set <key> <value>     Set a config value
@@ -372,7 +381,7 @@ otto                          LLM-powered PR lifecycle manager
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ otto server start --dashboard --tunnel                      │
+│ otto server start                                           │
 │                                                             │
 │  ┌──────────────────┐   ┌───────────────────────────────┐   │
 │  │ PR API (:4097)   │   │ Dashboard (:4098)             │   │
@@ -389,6 +398,7 @@ otto                          LLM-powered PR lifecycle manager
 │  ┌──────────────────────────────────────────────────────┐   │
 │  │ DevTunnel Manager (via bgtask)                       │   │
 │  │ Tunnel survives otto restarts · auto-restart always  │   │
+│  │ Health monitor auto-recovers stale connections       │   │
 │  │ Entra ID / GitHub org / anonymous access control     │   │
 │  └──────────────────────────────────────────────────────┘   │
 └─────────────────────────────────────────────────────────────┘

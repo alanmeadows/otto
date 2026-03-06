@@ -586,6 +586,32 @@ body {
 }
 .form-group input:focus, .form-group select:focus { border-color: var(--accent); }
 
+/* Searchable workdir picker */
+.workdir-picker { position: relative; }
+.workdir-dropdown {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    max-height: 200px;
+    overflow-y: auto;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-top: none;
+    border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+    z-index: 10;
+}
+.workdir-option {
+    padding: 6px 12px;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.workdir-option:hover { background: var(--bg-hover); }
+
 /* Tunnel */
 .tunnel-info { font-size: 12px; color: var(--text-secondary); margin-bottom: 8px; }
 .tunnel-label { color: var(--text-muted); }

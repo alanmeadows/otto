@@ -247,15 +247,80 @@ function handleError(payload) {
     updateSessionState(payload.session_name, 'error');
 }
 
+var _allWorktrees = [];
+
 function handleWorktreesList(payload) {
-    const select = document.getElementById('session-workdir');
-    select.innerHTML = '<option value="">Default (current directory)</option>';
-    (payload.worktrees || []).forEach(wt => {
-        const opt = document.createElement('option');
-        opt.value = wt.path;
-        opt.textContent = `${wt.repo_name}/${wt.branch} — ${wt.path}`;
-        select.appendChild(opt);
+    _allWorktrees = (payload.worktrees || []).map(wt => ({
+        path: wt.path,
+        label: wt.repo_name + '/' + wt.branch + ' — ' + wt.path,
+        repo: wt.repo_name,
+        branch: wt.branch,
+    }));
+
+    // Show/hide the "no repos" hint.
+    const hint = document.getElementById('no-repos-hint');
+    if (hint) hint.classList.toggle('hidden', _allWorktrees.length > 0);
+
+    // Reset hidden value.
+    document.getElementById('session-workdir').value = '';
+    document.getElementById('session-workdir-search').value = '';
+}
+
+function filterWorktrees(query) {
+    const dropdown = document.getElementById('workdir-dropdown');
+    const q = query.toLowerCase();
+
+    // Always include "Default" as first option.
+    var matches = [{ path: '', label: 'Default (current directory)', repo: '', branch: '' }];
+    _allWorktrees.forEach(wt => {
+        if (!q || wt.label.toLowerCase().includes(q) || wt.path.toLowerCase().includes(q)) {
+            matches.push(wt);
+        }
     });
+
+    if (matches.length === 0) {
+        dropdown.classList.add('hidden');
+        return;
+    }
+
+    dropdown.innerHTML = '';
+    matches.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'workdir-option';
+        div.textContent = m.label;
+        div.addEventListener('click', () => {
+            document.getElementById('session-workdir').value = m.path;
+            document.getElementById('session-workdir-search').value = m.path ? m.label : '';
+            dropdown.classList.add('hidden');
+        });
+        dropdown.appendChild(div);
+    });
+    dropdown.classList.remove('hidden');
+}
+
+function addRepoFromDialog() {
+    const name = document.getElementById('add-repo-name').value.trim();
+    const dir = document.getElementById('add-repo-dir').value.trim();
+    if (!name || !dir) return;
+
+    const keyParam = new URLSearchParams(location.search).get('key');
+    const url = '/api/repos' + (keyParam ? '?key=' + encodeURIComponent(keyParam) : '');
+    fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, primary_dir: dir }),
+    })
+    .then(r => {
+        if (!r.ok) return r.text().then(t => { throw new Error(t); });
+        return r.json();
+    })
+    .then(() => {
+        document.getElementById('add-repo-name').value = '';
+        document.getElementById('add-repo-dir').value = '';
+        // Server broadcasts updated worktrees list automatically.
+        send('list_worktrees', {});
+    })
+    .catch(err => alert('Failed to add repo: ' + err.message));
 }
 
 function handleReasoningDelta(payload) {
@@ -1232,6 +1297,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // New session button
     document.getElementById('new-session-btn').addEventListener('click', showNewSessionDialog);
+
+    // Workdir search picker
+    const workdirSearch = document.getElementById('session-workdir-search');
+    workdirSearch.addEventListener('input', () => filterWorktrees(workdirSearch.value));
+    workdirSearch.addEventListener('focus', () => filterWorktrees(workdirSearch.value));
+    // Allow typing a custom path — set hidden input on blur if no dropdown selection was made.
+    workdirSearch.addEventListener('blur', () => {
+        // Delay to allow dropdown click to fire first.
+        setTimeout(() => {
+            const dropdown = document.getElementById('workdir-dropdown');
+            dropdown.classList.add('hidden');
+            const hidden = document.getElementById('session-workdir');
+            // If user typed a raw path that doesn't match a selection, use it directly.
+            if (workdirSearch.value && !hidden.value) {
+                hidden.value = workdirSearch.value;
+            }
+        }, 200);
+    });
 
     // Share button
     document.getElementById('share-btn').addEventListener('click', shareSession);

@@ -146,10 +146,20 @@
                         </select>
                     </div>
                     <div class="form-group">
-                        <label for="session-workdir">Working Directory</label>
-                        <select id="session-workdir">
-                            <option value="">Default (current directory)</option>
-                        </select>
+                        <label for="session-workdir-search">Working Directory</label>
+                        <div class="workdir-picker">
+                            <input id="session-workdir-search" type="text" placeholder="Search or type a path…" autocomplete="off">
+                            <input id="session-workdir" type="hidden" value="">
+                            <div id="workdir-dropdown" class="workdir-dropdown hidden"></div>
+                        </div>
+                        <div id="no-repos-hint" class="hidden" style="margin-top:8px">
+                            <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px">No repositories configured. Add one to get started:</div>
+                            <div style="display:flex;gap:6px">
+                                <input id="add-repo-name" type="text" placeholder="Name" style="flex:1;padding:4px 8px;font-size:12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary)">
+                                <input id="add-repo-dir" type="text" placeholder="/path/to/repo" style="flex:2;padding:4px 8px;font-size:12px;background:var(--bg-tertiary);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-primary)">
+                                <button type="button" class="btn btn-sm" onclick="addRepoFromDialog()">Add</button>
+                            </div>
+                        </div>
                     </div>
                     <div class="modal-actions">
                         <button type="button" class="btn" onclick="hideNewSessionDialog()">Cancel</button>

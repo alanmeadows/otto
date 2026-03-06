@@ -16,6 +16,7 @@ import (
 
 	"github.com/alanmeadows/otto/internal/config"
 	"github.com/alanmeadows/otto/internal/copilot"
+	"github.com/alanmeadows/otto/internal/repo"
 	"github.com/alanmeadows/otto/internal/tunnel"
 )
 
@@ -275,6 +276,7 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/prs", s.guardDashboard(s.handleListPRs))
 	mux.HandleFunc("GET /api/prs/{id}", s.guardDashboard(s.handleGetPR))
 	mux.HandleFunc("GET /api/repos", s.guardDashboard(s.handleListRepos))
+	mux.HandleFunc("POST /api/repos", s.guardDashboard(s.handleAddRepo))
 	mux.HandleFunc("GET /api/tunnel/status", s.guardDashboard(s.handleTunnelStatus))
 	mux.HandleFunc("POST /api/tunnel/start", s.guardDashboard(s.handleStartTunnel))
 	mux.HandleFunc("POST /api/tunnel/stop", s.guardDashboard(s.handleStopTunnel))
@@ -382,6 +384,47 @@ func (s *Server) handleGetPR(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleListRepos(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, s.cfg.Repos)
+}
+
+func (s *Server) handleAddRepo(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name       string `json:"name"`
+		PrimaryDir string `json:"primary_dir"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+	if req.Name == "" || req.PrimaryDir == "" {
+		http.Error(w, "name and primary_dir are required", http.StatusBadRequest)
+		return
+	}
+
+	repoCfg := config.RepoConfig{
+		Name:           req.Name,
+		PrimaryDir:     req.PrimaryDir,
+		GitStrategy:    config.GitStrategyWorktree,
+		BranchTemplate: "otto/{{.Name}}",
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		http.Error(w, "cannot determine config dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	mgr := repo.NewManager(configDir)
+	if err := mgr.Add(s.cfg, repoCfg); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	slog.Info("repository added via dashboard", "name", req.Name, "dir", req.PrimaryDir)
+
+	// Refresh worktrees list for all clients.
+	s.bridge.BroadcastWorktrees(s.listWorktrees())
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, map[string]string{"status": "added", "name": req.Name})
 }
 
 func (s *Server) handleTunnelStatus(w http.ResponseWriter, r *http.Request) {

@@ -85,7 +85,9 @@ func (m *Manager) Start(ctx context.Context) error {
 			CLIUrl:    m.serverURL,
 			AutoStart: sdk.Bool(false),
 		}
-		slog.Info("connecting to shared copilot server", "url", m.serverURL)
+		slog.Info("copilot SDK connecting to shared server", "server", m.serverURL)
+	} else {
+		slog.Info("copilot SDK starting embedded process")
 	}
 
 	m.client = sdk.NewClient(opts)

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -83,7 +84,7 @@ func NewServer(cfg *config.Config) *Server {
 		keyedURL := ""
 		if running && url != "" {
 			keyedURL = url + "?key=" + dashKey
-			slog.Info("dashboard access URL", "url", keyedURL)
+			slog.Info("tunnel connected — dashboard available remotely", "url", keyedURL)
 		}
 		bridge.BroadcastTunnelStatus(running, url, keyedURL)
 	})
@@ -224,12 +225,15 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		} else if !s.tunnelMgr.IsInstalled() {
 			slog.Warn("tunnel skipped: devtunnel is not installed — install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
 		} else {
+			slog.Info("starting tunnel", "tunnel_id", s.cfg.Dashboard.TunnelID, "access", s.cfg.Dashboard.TunnelAccess, "forwarding_port", port)
 			go func() {
 				if err := s.tunnelMgr.Start(ctx, port); err != nil {
-					slog.Warn("auto-start tunnel failed", "error", err)
+					slog.Warn("tunnel start failed", "error", err)
 				}
 			}()
 		}
+	} else {
+		slog.Info("tunnel disabled via --no-tunnel")
 	}
 
 	// Poll ~/.copilot/session-state/ for changes and push updates to clients.
@@ -246,7 +250,7 @@ func (s *Server) Start(ctx context.Context, port int) error {
 		// bgtask-managed tunnels survive Otto restarts — don't stop them.
 	}()
 
-	slog.Info("starting dashboard server", "addr", addr)
+	slog.Info("dashboard server listening", "bind", "http://0.0.0.0:"+strconv.Itoa(port))
 	if err := s.srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("dashboard server error: %w", err)
 	}

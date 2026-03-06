@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -50,10 +51,13 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 	if cfg.Server.NoPRMonitoring {
 		slog.Info("PR monitoring disabled via --no-pr-monitoring")
 	} else {
+		slog.Info("starting PR monitoring", "model", cfg.Models.Primary, "interval", cfg.PR.Providers)
 		llmClient := llm.NewCopilotClient(cfg.Models.Primary)
 		if err := llmClient.Start(ctx); err != nil {
 			slog.Warn("Copilot LLM client not available — PR monitoring disabled", "error", err)
 		} else {
+			interval := cfg.Server.ParsePollInterval()
+			slog.Info("PR monitoring started", "model", cfg.Models.Primary, "poll_interval", interval)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
@@ -85,6 +89,8 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 				slog.Error("dashboard server error", "error", err)
 			}
 		}()
+	} else {
+		slog.Info("dashboard disabled via --no-dashboard")
 	}
 
 	// Shutdown on context cancellation.
@@ -98,7 +104,7 @@ func RunServer(ctx context.Context, port int, cfg *config.Config) error {
 		}
 	}()
 
-	slog.Info("starting HTTP server", "addr", addr)
+	slog.Info("PR API server listening", "bind", "http://0.0.0.0:"+strconv.Itoa(port))
 	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("server error: %w", err)
 	}

@@ -208,17 +208,17 @@ Recommended configuration:
 # Persistent tunnel ID — stable URL across restarts
 otto config set dashboard.tunnel_id "yourname-otto"
 
-# Start the server — dashboard and tunnel auto-enable from config
+# Start the server — dashboard and tunnel are on by default
 otto server start
 ```
 
 On start, otto logs an access URL with an embedded secret key:
 
 ```
-INFO dashboard access URL url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1...
+tunnel connected — dashboard available remotely  url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1...
 ```
 
-Copy this URL to your phone — the key authenticates you automatically and sets a cookie for future visits. Users without the key see a passcode prompt. Session share links (`/shared/{token}`) bypass dashboard auth.
+If devtunnel or bgtask aren't installed, otto logs a warning with install instructions and continues without the tunnel. Use `otto server status` to see all active endpoints including the tunnel URL.
 
 See [docs/tunnel.md](docs/tunnel.md) for the full setup guide.
 

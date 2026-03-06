@@ -166,6 +166,14 @@ func TestIsInfraFailure(t *testing.T) {
 		{"empty string", "", false},
 		{"preamble then classification", "Here is my analysis:\n\nCLASSIFICATION: INFRASTRUCTURE\n\nDetails.", true},
 		{"markdown heading prefix", "## CLASSIFICATION: INFRASTRUCTURE\n\nDetails.", true},
+		// Classification marker past line 10.
+		{"marker buried deep", "Line1\nLine2\nLine3\nLine4\nLine5\nLine6\nLine7\nLine8\nLine9\nLine10\nLine11\nCLASSIFICATION: INFRASTRUCTURE\nDetails.", true},
+		// Fallback heuristics — no CLASSIFICATION marker.
+		{"fallback infra root cause with retry", "## Failure Summary\n\nBuild failed.\n\n### Root Cause Analysis\n\nBoth failures point to **infrastructure/environment issues**.\n\n### Recommended Action\n\n**Retry the build.** No code changes are indicated.", true},
+		{"fallback infra diagnosis with no code changes", "## Diagnosis\n\nThe failure is an infrastructure issue.\n\nNo code changes are needed.", true},
+		{"fallback code failure no infra signals", "## Failure Summary\n\nCompilation failed.\n\n### Root Cause\n\nType error in main.go.\n\n### Recommended Action\n\nFix the type mismatch.", false},
+		{"fallback infra without retry or no-code-changes", "## Root Cause\n\nInfrastructure issue detected.\n\n### Action\n\nInvestigate the agent pool.", false},
+		{"fallback retry without infra root cause", "## Summary\n\nTest failed.\n\n### Recommended Action\n\nRetry the build.", false},
 	}
 
 	for _, tt := range tests {

@@ -662,10 +662,12 @@ Do NOT introduce unnecessary changes beyond resolving the conflicts.`, pr.ID, pr
 }
 
 // isInfraFailure checks whether the Phase 1 diagnosis classifies the failure
-// as an infrastructure issue (not a code bug). It looks for a CLASSIFICATION:
-// marker in the first few lines of the LLM response.
+// as an infrastructure issue (not a code bug). It first looks for an explicit
+// CLASSIFICATION: marker anywhere in the LLM response. If none is found, it
+// falls back to heuristic analysis of the diagnosis text.
 func isInfraFailure(diagnosis string) bool {
-	for _, line := range strings.SplitN(diagnosis, "\n", 10) {
+	// Primary: Look for an explicit CLASSIFICATION: marker.
+	for _, line := range strings.Split(diagnosis, "\n") {
 		line = strings.TrimSpace(line)
 		// Strip common markdown formatting characters.
 		line = strings.NewReplacer("*", "", "`", "", "#", "").Replace(line)
@@ -684,6 +686,22 @@ func isInfraFailure(diagnosis string) bool {
 		// Found a classification line but it doesn't say INFRASTRUCTURE.
 		return false
 	}
+
+	// Fallback: No CLASSIFICATION marker found. Check for structured
+	// indicators that the diagnosis describes an infrastructure failure.
+	upper := strings.ToUpper(diagnosis)
+	hasInfraRootCause := strings.Contains(upper, "INFRASTRUCTURE") &&
+		(strings.Contains(upper, "ROOT CAUSE") || strings.Contains(upper, "FAILURE SUMMARY") || strings.Contains(upper, "DIAGNOSIS"))
+	hasRetryAction := strings.Contains(upper, "RETRY") &&
+		(strings.Contains(upper, "RECOMMENDED") || strings.Contains(upper, "ACTION"))
+	hasNoCodeChanges := strings.Contains(upper, "NO CODE CHANGES")
+
+	// Require infrastructure root cause PLUS a retry recommendation or "no code changes".
+	if hasInfraRootCause && (hasRetryAction || hasNoCodeChanges) {
+		slog.Debug("isInfraFailure: no CLASSIFICATION marker found, matched via fallback heuristics")
+		return true
+	}
+
 	return false
 }
 

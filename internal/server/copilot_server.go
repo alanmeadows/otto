@@ -55,7 +55,8 @@ func ensureCopilotServer() (string, error) {
 
 	// Start via bgtask with auto-restart.
 	args := []string{"run", "--name", copilotBgtaskName, "--restart", "always",
-		"--", copilotBin, "--headless", "--port", strconv.Itoa(port), "--log-level", "info"}
+		"--", copilotBin, "--headless", "--no-auto-update",
+		"--port", strconv.Itoa(port), "--log-level", "info"}
 	cmd := exec.Command("bgtask", args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("starting copilot server via bgtask: %s: %w", strings.TrimSpace(string(out)), err)

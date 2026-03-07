@@ -22,8 +22,8 @@ The authentication provider you choose here determines how tunnel visitors authe
 ## Quick Start
 
 ```bash
-# Start the dashboard with a tunnel
-otto server start --dashboard --tunnel
+# Start the server — dashboard and tunnel are enabled by default
+otto server start
 ```
 
 On tunnel start, otto generates a secret access key and logs the full access URL:
@@ -35,6 +35,8 @@ INFO dashboard access URL url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1d
 Copy this URL and open it on your phone or any browser. The key is embedded in the URL so you can share it with yourself via Teams/iMessage/email without needing to remember a passcode.
 
 The first visit with `?key=` sets a browser cookie (30 days) and redirects to a clean URL — subsequent visits don't need the key.
+
+When the tunnel is active, the dashboard sidebar shows a **QR code** you can scan to open the dashboard on your phone instantly.
 
 ## Dashboard Access Control
 
@@ -48,6 +50,42 @@ Otto uses a URL-based access key to protect the dashboard:
 The key is shown in:
 - The server logs on tunnel start
 - The dashboard sidebar tunnel URL field (for easy copying)
+
+## Insecure Modes
+
+For convenience on trusted networks, otto offers two opt-in flags to relax security:
+
+### `--insecure-tunnel`
+
+Launches the DevTunnel with anonymous access — no Azure AD / GitHub login required to reach the tunnel URL. Anyone with the URL can connect.
+
+```bash
+otto server start --insecure-tunnel
+```
+
+This is equivalent to setting `dashboard.tunnel_access: "anonymous"` in config.
+
+### `--insecure-dashboard`
+
+Disables the dashboard passcode (`?key=`) requirement. Anyone who can reach the dashboard URL has full access without authentication.
+
+```bash
+otto server start --insecure-dashboard
+```
+
+This is equivalent to setting `dashboard.require_key: false` in config.
+
+### Combined
+
+For a fully open dashboard accessible to anyone on the internet (no tunnel auth, no passcode):
+
+```bash
+otto server start --insecure-tunnel --insecure-dashboard
+```
+
+> ⚠️ **Warning:** This gives anyone with the URL full access to your Copilot sessions, including the ability to send messages and create new sessions. Only use this on trusted networks or for demos.
+
+Both flags produce warning messages at startup and in the server logs.
 
 ## Configuration
 
@@ -76,12 +114,16 @@ otto config set dashboard.tunnel_access "authenticated"
 otto config set dashboard.tunnel_access "anonymous"
 ```
 
-### Auto-Start
+### Dashboard Passcode
 
-Start the tunnel automatically whenever the dashboard starts:
+Control whether remote access requires the `?key=` parameter:
 
 ```bash
-otto config set dashboard.auto_start_tunnel true
+# Require passcode (default)
+otto config set dashboard.require_key true
+
+# Disable passcode — fully open dashboard
+otto config set dashboard.require_key false
 ```
 
 ### Process Lifecycle
@@ -100,5 +142,5 @@ The devtunnel runs as an independent [bgtask](https://github.com/philsphicas/bgt
 | `dashboard.tunnel_id` | string | | Persistent tunnel name for stable URL |
 | `dashboard.tunnel_access` | string | `authenticated` | `anonymous`, `tenant`, or `authenticated` |
 | `dashboard.tunnel_allow_org` | string | | GitHub org to grant tunnel access |
-| `dashboard.tunnel_allow_emails` | string[] | | Specific email addresses to grant tunnel access |
-| `dashboard.auto_start_tunnel` | bool | `false` | Auto-start tunnel with dashboard |
+| `dashboard.require_key` | bool | `true` | Require passcode for remote dashboard access |
+| `dashboard.allowed_users` | string[] | | Emails allowed full dashboard access |

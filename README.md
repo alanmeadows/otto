@@ -44,9 +44,9 @@ The goal: submit a PR and let otto get it to green without you babysitting it.
 
 - **PR autopilot** — monitors PRs for pipeline failures, review comments, merge conflicts, and MerlinBot feedback; auto-fixes and re-pushes up to configurable max attempts
 - **Guided PR review** — LLM-powered code review with focus guidance and interactive inline comment posting
-- **Copilot dashboard** — web UI for managing Copilot CLI sessions with real-time streaming, session resume, and live activity monitoring
+- **Copilot dashboard** — web UI for managing Copilot CLI sessions with real-time streaming, sub-agent tracking, tool progress, session lifecycle events, and live activity monitoring
 - **Session sharing** — generate time-limited read-only links to share a single session's live conversation
-- **Remote access** — Azure DevTunnel integration with Entra ID, org-scoped, or anonymous access control
+- **Remote access** — Azure DevTunnel integration with Entra ID, org-scoped, or anonymous access control; QR code for quick phone access
 - **Session discovery** — automatically discovers persisted sessions with live activity timestamps
 - **Notifications** — Microsoft Teams notifications for PR events via Power Automate ([setup guide](docs/notifications.md))
 - **Multi-provider** — pluggable PR backends for Azure DevOps and GitHub
@@ -136,8 +136,9 @@ Open **http://localhost:4098** in your browser. The dashboard shows:
 - All persisted Copilot CLI sessions with live "last activity" timestamps
 - Resume any session and continue the conversation
 - Create new sessions with model selection
-- Real-time streaming of LLM responses and tool calls
+- Real-time streaming of LLM responses, tool calls, sub-agents, and session events
 - Share individual sessions via time-limited read-only links
+- QR code for quick tunnel access from your phone
 
 The tunnel is managed via bgtask so it survives otto restarts. Otto monitors the tunnel health every 2 minutes — if the relay connection drops (process alive but disconnected), otto automatically restarts the tunnel. The dashboard shows the tunnel status and URL when active, and links to the [setup guide](docs/tunnel.md) when inactive. Allowed users can be managed live from the dashboard sidebar.
 
@@ -341,6 +342,7 @@ Use `otto config show` to inspect the merged result and `otto config set <key> <
 | `dashboard.owner_email` | string | | Dashboard owner email (auto-detected from tunnel JWT if empty) |
 | `dashboard.owner_nickname` | string | `owner` | Display name for session owner in chat bubbles |
 | `dashboard.allowed_users` | string[] | | Emails allowed full dashboard access |
+| `dashboard.require_key` | bool | `true` | Require passcode for remote dashboard access. Set to `false` for fully open dashboard (not recommended) |
 | `notifications.teams_webhook_url` | string | | Microsoft Teams webhook URL |
 | `notifications.events` | string[] | | Events to notify on |
 
@@ -369,6 +371,8 @@ otto                          LLM-powered PR lifecycle manager
 │   │   ├── --no-dashboard       Disable Copilot session dashboard
 │   │   ├── --no-tunnel          Disable Azure DevTunnel
 │   │   ├── --no-pr-monitoring   Disable PR monitoring loop
+│   │   ├── --insecure-tunnel    Launch tunnel without authentication
+│   │   ├── --insecure-dashboard Disable dashboard passcode requirement
 │   │   ├── --dashboard-port     Dashboard port (default: 4098)
 │   │   ├── --port            Server port (default: 4097)
 │   │   └── --foreground      Run in foreground

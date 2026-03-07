@@ -142,6 +142,8 @@ The tunnel is managed via bgtask so it survives otto restarts. Otto monitors the
 
 The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
 
+![Dashboard demo — session list, live streaming, watch mode, saved sessions, PR monitoring, tunnel QR](docs/images/dashboard-demo.gif)
+
 The Copilot CLI embeds its own copilot server that Otto cannot connect to — so Otto reads session event logs from disk and runs its own server for interactive sessions. This creates three session modes:
 
 - **Watch** — tail a live CLI session in real time (read-only)

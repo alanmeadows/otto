@@ -125,6 +125,38 @@ function handleMessage(msg) {
         case 'dashboard_config': handleDashboardConfig(msg.payload); break;
         case 'watch_history': handleWatchHistory(msg.payload); break;
         case 'watch_event': handleWatchEvent(msg.payload); break;
+        // Subagent lifecycle.
+        case 'subagent_started': handleSubagentStarted(msg.payload); break;
+        case 'subagent_completed': handleSubagentCompleted(msg.payload); break;
+        case 'subagent_failed': handleSubagentFailed(msg.payload); break;
+        case 'subagent_selected': handleSubagentSelected(msg.payload); break;
+        case 'subagent_deselected': handleSubagentDeselected(msg.payload); break;
+        // Tool progress.
+        case 'tool_progress': handleToolProgress(msg.payload); break;
+        case 'tool_partial_result': handleToolPartialResult(msg.payload); break;
+        // Session lifecycle.
+        case 'title_changed': handleTitleChanged(msg.payload); break;
+        case 'compaction_start': handleCompactionStart(msg.payload); break;
+        case 'compaction_complete': handleCompactionComplete(msg.payload); break;
+        case 'plan_changed': handlePlanChanged(msg.payload); break;
+        case 'task_complete': handleTaskComplete(msg.payload); break;
+        case 'context_changed': break; // handled via sessions_list refresh
+        case 'model_change': handleModelChange(msg.payload); break;
+        case 'mode_changed': handleModeChanged(msg.payload); break;
+        case 'session_warning': handleSessionWarning(msg.payload); break;
+        case 'session_info': handleSessionInfoMsg(msg.payload); break;
+        // User input / elicitation.
+        case 'user_input_requested': handleUserInputRequested(msg.payload); break;
+        case 'user_input_completed': handleUserInputCompleted(msg.payload); break;
+        case 'elicitation_requested': handleElicitationRequested(msg.payload); break;
+        case 'elicitation_completed': handleElicitationCompleted(msg.payload); break;
+        // Permissions.
+        case 'permission_requested': handlePermissionRequested(msg.payload); break;
+        case 'permission_completed': handlePermissionCompleted(msg.payload); break;
+        // Hooks & skills.
+        case 'hook_start': handleHookStart(msg.payload); break;
+        case 'hook_end': handleHookEnd(msg.payload); break;
+        case 'skill_invoked': handleSkillInvoked(msg.payload); break;
     }
 }
 
@@ -517,6 +549,267 @@ function handleWatchEvent(payload) {
     }
 }
 
+// --- Subagent lifecycle handlers ---
+
+function handleSubagentStarted(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var label = payload.agent_display_name || payload.agent_name || 'sub-agent';
+    if (payload.agent_description) {
+        var desc = payload.agent_description;
+        if (desc.length > 60) desc = desc.substring(0, 57) + '...';
+        label += ': ' + desc;
+    }
+    appendSubagentIndicator(payload.tool_call_id, label, 'running');
+    updateActivity('🤖 ' + (payload.agent_display_name || payload.agent_name || 'sub-agent') + '...');
+}
+
+function handleSubagentCompleted(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    updateSubagentIndicator(payload.tool_call_id, 'completed');
+}
+
+function handleSubagentFailed(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    updateSubagentIndicator(payload.tool_call_id, 'failed');
+}
+
+function handleSubagentSelected(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var name = payload.agent_display_name || payload.agent_name || 'custom agent';
+    appendSessionBanner('info', '🤖 Agent: ' + name);
+}
+
+function handleSubagentDeselected(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendSessionBanner('info', '🤖 Returned to default agent');
+}
+
+function appendSubagentIndicator(callId, label, status) {
+    var container = document.getElementById('chat-messages');
+    var group = container.lastElementChild;
+    if (!group || !group.classList.contains('subagent-group')) {
+        group = document.createElement('div');
+        group.className = 'subagent-group expanded';
+        group.innerHTML = '<div class="subagent-group-header has-running" onclick="this.parentElement.classList.toggle(\'expanded\')">' +
+            '<span class="subagent-group-icon">▶</span> <span class="subagent-group-count">🤖 1 sub-agent</span></div>' +
+            '<div class="subagent-group-body"></div>';
+        container.appendChild(group);
+    }
+    var body = group.querySelector('.subagent-group-body');
+    var div = document.createElement('div');
+    div.className = 'subagent-indicator ' + status;
+    div.id = 'subagent-' + callId;
+    var icon = status === 'running' ? '⏳' : (status === 'completed' ? '✅' : '❌');
+    div.innerHTML = '<span>' + icon + '</span> <span class="subagent-name">' + esc(label) + '</span>';
+    body.appendChild(div);
+    var count = body.querySelectorAll('.subagent-indicator').length;
+    group.querySelector('.subagent-group-count').textContent = '🤖 ' + count + ' sub-agent' + (count !== 1 ? 's' : '');
+    scrollToBottom();
+}
+
+function updateSubagentIndicator(callId, status) {
+    var el = document.getElementById('subagent-' + callId);
+    if (!el) return;
+    el.className = 'subagent-indicator ' + status;
+    var icon = status === 'completed' ? '✅' : '❌';
+    var nameEl = el.querySelector('.subagent-name');
+    var name = nameEl ? nameEl.textContent : '';
+    el.innerHTML = '<span>' + icon + '</span> <span class="subagent-name">' + esc(name) + '</span>';
+    var group = el.closest('.subagent-group');
+    if (group) {
+        var body = group.querySelector('.subagent-group-body');
+        var header = group.querySelector('.subagent-group-header');
+        if (body && header) {
+            var running = body.querySelectorAll('.subagent-indicator.running').length;
+            var failed = body.querySelectorAll('.subagent-indicator.failed').length;
+            header.classList.toggle('has-running', running > 0);
+            header.classList.toggle('has-failed', failed > 0);
+            if (running === 0) group.classList.remove('expanded');
+        }
+    }
+}
+
+// --- Tool progress handlers ---
+
+function handleToolProgress(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var el = document.getElementById('tool-' + payload.call_id);
+    if (!el) return;
+    var nameEl = el.querySelector('.tool-name');
+    if (nameEl && payload.progress_message) {
+        var base = nameEl.textContent.split(' — ')[0];
+        nameEl.textContent = base + ' — ' + payload.progress_message;
+    }
+}
+
+function handleToolPartialResult(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var el = document.getElementById('tool-' + payload.call_id);
+    if (!el) return;
+    var nameEl = el.querySelector('.tool-name');
+    if (nameEl && payload.partial_output) {
+        var base = nameEl.textContent.split(' — ')[0];
+        var partial = payload.partial_output;
+        if (partial.length > 80) partial = partial.substring(0, 77) + '...';
+        nameEl.textContent = base + ' — ' + partial;
+    }
+}
+
+// --- Session lifecycle handlers ---
+
+function handleTitleChanged(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    if (payload.title) {
+        document.getElementById('chat-session-name').textContent = payload.title.length > 30 ? payload.title.substring(0, 27) + '...' : payload.title;
+    }
+}
+
+function handleCompactionStart(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendSessionBanner('info', '📦 Compacting context...');
+}
+
+function handleCompactionComplete(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    if (payload.success) {
+        appendSessionBanner('success', '📦 Context compacted');
+    } else {
+        appendSessionBanner('warning', '📦 Compaction failed');
+    }
+}
+
+function handlePlanChanged(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var msg = '📋 Plan updated';
+    if (payload.summary) {
+        var s = payload.summary;
+        if (s.length > 60) s = s.substring(0, 57) + '...';
+        msg += ': ' + s;
+    }
+    appendSessionBanner('info', msg);
+}
+
+function handleTaskComplete(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var msg = '✅ Task complete';
+    if (payload.summary) {
+        var s = payload.summary;
+        if (s.length > 60) s = s.substring(0, 57) + '...';
+        msg += ': ' + s;
+    }
+    appendSessionBanner('success', msg);
+}
+
+function handleModelChange(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var msg = '🔄 Model → ' + (payload.new_model || 'unknown');
+    appendSessionBanner('info', msg);
+    document.getElementById('chat-session-model').textContent = payload.new_model || '';
+}
+
+function handleModeChanged(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendSessionBanner('info', '🔀 Mode → ' + (payload.new_mode || 'unknown'));
+}
+
+function handleSessionWarning(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var msg = '⚠️ ' + (payload.message || 'Warning');
+    appendSessionBanner('warning', msg);
+}
+
+function handleSessionInfoMsg(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var msg = 'ℹ️ ' + (payload.message || 'Info');
+    appendSessionBanner('info', msg);
+}
+
+// --- User input / elicitation handlers ---
+
+function handleUserInputRequested(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendUserInputCard(payload.request_id, payload.question, payload.choices);
+}
+
+function handleUserInputCompleted(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    resolveUserInputCard(payload.request_id);
+}
+
+function handleElicitationRequested(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendUserInputCard(payload.request_id, payload.message || 'Form input requested', []);
+}
+
+function handleElicitationCompleted(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    resolveUserInputCard(payload.request_id);
+}
+
+function appendUserInputCard(requestId, question, choices) {
+    var container = document.getElementById('chat-messages');
+    var card = document.createElement('div');
+    card.className = 'user-input-card';
+    card.id = 'uic-' + requestId;
+    var html = '<div class="uic-question">❓ ' + esc(question || '') + '</div>';
+    if (choices && choices.length > 0) {
+        html += '<div class="uic-choices">';
+        for (var i = 0; i < choices.length; i++) {
+            html += '<span class="uic-choice">' + esc(choices[i]) + '</span>';
+        }
+        html += '</div>';
+    }
+    card.innerHTML = html;
+    container.appendChild(card);
+    scrollToBottom();
+}
+
+function resolveUserInputCard(requestId) {
+    var el = document.getElementById('uic-' + requestId);
+    if (el) el.classList.add('resolved');
+}
+
+// --- Permission handlers ---
+
+function handlePermissionRequested(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    var label = payload.tool_name || payload.permission_kind || 'permission';
+    appendToolIndicator('perm-' + payload.request_id, '🔐 ' + label, 'running');
+}
+
+function handlePermissionCompleted(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    updateToolIndicator('perm-' + payload.request_id, 'completed');
+}
+
+// --- Hook & skill handlers ---
+
+function handleHookStart(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendToolIndicator('hook-' + payload.hook_id, '🪝 ' + (payload.hook_type || 'hook'), 'running');
+}
+
+function handleHookEnd(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    updateToolIndicator('hook-' + payload.hook_id, payload.success ? 'completed' : 'failed');
+}
+
+function handleSkillInvoked(payload) {
+    if (payload.session_name !== state.activeSession) return;
+    appendSessionBanner('info', '⚡ Skill: ' + (payload.skill_name || 'unknown'));
+}
+
+// --- Session banner helper ---
+
+function appendSessionBanner(type, message) {
+    var container = document.getElementById('chat-messages');
+    var div = document.createElement('div');
+    div.className = 'session-banner ' + type;
+    div.textContent = message;
+    container.appendChild(div);
+    scrollToBottom();
+}
+
 function forkSession(sessionId) {
     send('fork_session', { session_id: sessionId, model: 'claude-opus-4.6' });
     state._watchingSession = null;
@@ -582,6 +875,7 @@ function renderTunnelStatus() {
     const activeEl = document.getElementById('tunnel-active');
     const inactiveEl = document.getElementById('tunnel-inactive');
     const badge = document.getElementById('tunnel-status');
+    const qrEl = document.getElementById('tunnel-qr');
 
     if (state.tunnelRunning && state.tunnelURL) {
         activeEl.classList.remove('hidden');
@@ -589,10 +883,19 @@ function renderTunnelStatus() {
         badge.classList.remove('hidden');
         badge.textContent = '🔗 Tunnel';
         badge.title = 'Click to copy tunnel URL';
+        var url = state.tunnelKeyedURL || state.tunnelURL;
+        if (qrEl) {
+            qrEl.innerHTML = '';
+            try {
+                var canvas = generateQRCode(url, 160);
+                qrEl.appendChild(canvas);
+            } catch (e) { /* QR generation failed silently */ }
+        }
     } else {
         activeEl.classList.add('hidden');
         inactiveEl.classList.remove('hidden');
         badge.classList.add('hidden');
+        if (qrEl) qrEl.innerHTML = '';
     }
 }
 
@@ -1730,3 +2033,391 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') hideNewSessionDialog();
     });
 });
+
+// ---------------------------------------------------------------------------
+// Minimal QR Code generator (no external dependencies)
+// Generates a QR code on a canvas element. Supports alphanumeric/byte mode.
+// ---------------------------------------------------------------------------
+
+function generateQRCode(text, size) {
+    var modules = qrEncodeText(text);
+    var n = modules.length;
+    var canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    var ctx = canvas.getContext('2d');
+    var cellSize = size / (n + 8); // quiet zone of 4 on each side
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, size, size);
+    ctx.fillStyle = '#000000';
+    for (var y = 0; y < n; y++) {
+        for (var x = 0; x < n; x++) {
+            if (modules[y][x]) {
+                ctx.fillRect((x + 4) * cellSize, (y + 4) * cellSize, cellSize + 0.5, cellSize + 0.5);
+            }
+        }
+    }
+    return canvas;
+}
+
+// QR encoding using byte mode, error correction level L.
+function qrEncodeText(text) {
+    var data = [];
+    for (var i = 0; i < text.length; i++) {
+        data.push(text.charCodeAt(i));
+    }
+    // Determine minimum version (1-40) for byte mode, EC level L.
+    var version = 1;
+    var capacities = [0,17,32,53,78,106,134,154,192,230,271,321,367,425,458,520,586,644,718,792,858,929,1003,1091,1171,1273,1367,1465,1528,1628,1732,1840,1952,2068,2188,2303,2431,2563,2699,2809,2953];
+    while (version < 40 && data.length > capacities[version]) version++;
+    var size = version * 4 + 17;
+    var modules = [];
+    var isFunction = [];
+    for (var y = 0; y < size; y++) {
+        modules.push(new Array(size).fill(false));
+        isFunction.push(new Array(size).fill(false));
+    }
+
+    // Place finder patterns.
+    function placeFinderPattern(row, col) {
+        for (var dy = -4; dy <= 4; dy++) {
+            for (var dx = -4; dx <= 4; dx++) {
+                var yy = row + dy, xx = col + dx;
+                if (yy < 0 || yy >= size || xx < 0 || xx >= size) continue;
+                var dist = Math.max(Math.abs(dy), Math.abs(dx));
+                modules[yy][xx] = dist !== 4 && (dist !== 2 || (dy === 0 && dx === 0) || dist === 0 || dist === 3);
+                isFunction[yy][xx] = true;
+            }
+        }
+    }
+    placeFinderPattern(3, 3);
+    placeFinderPattern(3, size - 4);
+    placeFinderPattern(size - 4, 3);
+
+    // Timing patterns.
+    for (var i = 8; i < size - 8; i++) {
+        modules[6][i] = i % 2 === 0;
+        isFunction[6][i] = true;
+        modules[i][6] = i % 2 === 0;
+        isFunction[i][6] = true;
+    }
+
+    // Alignment patterns.
+    var alignPos = qrAlignmentPositions(version);
+    for (var ai = 0; ai < alignPos.length; ai++) {
+        for (var aj = 0; aj < alignPos.length; aj++) {
+            var ay = alignPos[ai], ax = alignPos[aj];
+            if ((ay < 9 && ax < 9) || (ay < 9 && ax > size - 9) || (ay > size - 9 && ax < 9)) continue;
+            for (var dy = -2; dy <= 2; dy++) {
+                for (var dx = -2; dx <= 2; dx++) {
+                    modules[ay + dy][ax + dx] = Math.abs(dy) === 2 || Math.abs(dx) === 2 || (dy === 0 && dx === 0);
+                    isFunction[ay + dy][ax + dx] = true;
+                }
+            }
+        }
+    }
+
+    // Reserve format/version areas.
+    for (var i = 0; i < 9; i++) {
+        isFunction[8][i] = true; isFunction[i][8] = true;
+        isFunction[8][size - 1 - i] = true; isFunction[size - 1 - i][8] = true;
+    }
+    modules[size - 8][8] = true; isFunction[size - 8][8] = true; // dark module
+    if (version >= 7) {
+        for (var i = 0; i < 6; i++) {
+            for (var j = 0; j < 3; j++) {
+                isFunction[i][size - 11 + j] = true;
+                isFunction[size - 11 + j][i] = true;
+            }
+        }
+    }
+
+    // Encode data.
+    var ecInfo = qrECInfo(version);
+    var dataCodewords = ecInfo.dataCodewords;
+    var bits = [];
+    // Mode indicator (byte = 0100).
+    bits.push(0,1,0,0);
+    // Character count.
+    var ccBits = version <= 9 ? 8 : 16;
+    for (var i = ccBits - 1; i >= 0; i--) bits.push((data.length >> i) & 1);
+    // Data bytes.
+    for (var i = 0; i < data.length; i++) {
+        for (var j = 7; j >= 0; j--) bits.push((data[i] >> j) & 1);
+    }
+    // Terminator.
+    for (var i = 0; i < 4 && bits.length < dataCodewords * 8; i++) bits.push(0);
+    while (bits.length % 8 !== 0) bits.push(0);
+    // Pad codewords.
+    var pads = [0xEC, 0x11];
+    var pi = 0;
+    while (bits.length < dataCodewords * 8) {
+        for (var j = 7; j >= 0; j--) bits.push((pads[pi] >> j) & 1);
+        pi ^= 1;
+    }
+
+    // Convert to codeword bytes.
+    var codewords = [];
+    for (var i = 0; i < bits.length; i += 8) {
+        var byte = 0;
+        for (var j = 0; j < 8; j++) byte = (byte << 1) | bits[i + j];
+        codewords.push(byte);
+    }
+
+    // RS error correction.
+    var ecCodewords = qrRSEncode(codewords, ecInfo);
+
+    // Interleave and combine.
+    var allCodewords = qrInterleave(codewords, ecCodewords, ecInfo);
+
+    // Place data bits.
+    var bitIdx = 0;
+    for (var right = size - 1; right >= 1; right -= 2) {
+        if (right === 6) right = 5;
+        for (var vert = 0; vert < size; vert++) {
+            for (var j = 0; j < 2; j++) {
+                var x = right - j;
+                var upward = ((right + 1) & 2) === 0;
+                var y = upward ? size - 1 - vert : vert;
+                if (!isFunction[y][x] && bitIdx < allCodewords.length * 8) {
+                    modules[y][x] = ((allCodewords[bitIdx >> 3] >> (7 - (bitIdx & 7))) & 1) === 1;
+                    bitIdx++;
+                }
+            }
+        }
+    }
+
+    // Apply best mask and format info.
+    var bestMask = 0, bestPenalty = Infinity;
+    for (var mask = 0; mask < 8; mask++) {
+        var trial = modules.map(function(r) { return r.slice(); });
+        qrApplyMask(trial, isFunction, mask, size);
+        qrPlaceFormatBits(trial, mask, size, version);
+        var penalty = qrPenalty(trial, size);
+        if (penalty < bestPenalty) { bestPenalty = penalty; bestMask = mask; }
+    }
+    qrApplyMask(modules, isFunction, bestMask, size);
+    qrPlaceFormatBits(modules, bestMask, size, version);
+
+    return modules;
+}
+
+function qrAlignmentPositions(version) {
+    if (version === 1) return [];
+    var n = Math.floor(version / 7) + 2;
+    var first = 6;
+    var last = version * 4 + 10;
+    var positions = [first];
+    if (n > 2) {
+        var step = Math.ceil((last - first) / (n - 1));
+        if (step % 2 !== 0) step++;
+        for (var i = n - 2; i >= 1; i--) positions.push(last - i * step);
+    }
+    positions.push(last);
+    return positions;
+}
+
+function qrECInfo(version) {
+    // EC level L lookup: [totalCodewords, ecCodewordsPerBlock, numBlocks1, dataPerBlock1, numBlocks2, dataPerBlock2]
+    var table = [
+        null,
+        [26,7,1,19,0,0],[44,10,1,34,0,0],[70,15,1,55,0,0],[100,20,1,80,0,0],[134,26,1,108,0,0],
+        [172,18,2,68,0,0],[196,20,2,78,0,0],[242,24,2,97,0,0],[292,30,2,116,0,0],[346,18,2,68,2,69],
+        [404,20,4,81,0,0],[466,24,2,92,2,93],[532,26,4,107,0,0],[581,30,3,115,1,116],[655,22,5,87,1,88],
+        [733,24,5,98,1,99],[815,28,1,107,5,108],[901,30,5,120,1,121],[991,28,3,113,4,114],[1085,28,4,107,5,108],
+        [1156,28,4,116,4,117],[1258,28,2,111,7,112],[1364,30,4,121,5,122],[1474,30,6,117,4,118],[1588,26,8,106,4,107],
+        [1706,28,10,114,2,115],[1828,30,8,122,4,123],[1921,30,3,117,10,118],[2051,30,7,116,7,117],[2185,30,5,115,10,116],
+        [2323,30,13,115,3,116],[2465,30,17,115,0,0],[2611,30,17,115,1,116],[2761,30,13,115,6,116],[2876,30,12,121,7,122],
+        [3034,30,6,121,14,122],[3196,30,17,122,4,123],[3362,30,4,122,18,123],[3532,30,20,117,4,118]
+    ];
+    var t = table[version];
+    var totalCodewords = t[0];
+    var ecPerBlock = t[1];
+    var numBlocks1 = t[2], dataPerBlock1 = t[3];
+    var numBlocks2 = t[4], dataPerBlock2 = t[5];
+    var totalBlocks = numBlocks1 + numBlocks2;
+    var dataCodewords = numBlocks1 * dataPerBlock1 + numBlocks2 * dataPerBlock2;
+    return { totalCodewords: totalCodewords, ecPerBlock: ecPerBlock, numBlocks1: numBlocks1, dataPerBlock1: dataPerBlock1, numBlocks2: numBlocks2, dataPerBlock2: dataPerBlock2, totalBlocks: totalBlocks, dataCodewords: dataCodewords };
+}
+
+function qrRSEncode(dataWords, ecInfo) {
+    var ecPerBlock = ecInfo.ecPerBlock;
+    var gen = qrRSGenerator(ecPerBlock);
+    var blocks1 = [], blocks2 = [];
+    var offset = 0;
+    for (var i = 0; i < ecInfo.numBlocks1; i++) {
+        blocks1.push(dataWords.slice(offset, offset + ecInfo.dataPerBlock1));
+        offset += ecInfo.dataPerBlock1;
+    }
+    for (var i = 0; i < ecInfo.numBlocks2; i++) {
+        blocks2.push(dataWords.slice(offset, offset + ecInfo.dataPerBlock2));
+        offset += ecInfo.dataPerBlock2;
+    }
+    var ecBlocks = [];
+    var allBlocks = blocks1.concat(blocks2);
+    for (var i = 0; i < allBlocks.length; i++) {
+        ecBlocks.push(qrRSDivide(allBlocks[i], gen));
+    }
+    return ecBlocks;
+}
+
+function qrInterleave(dataWords, ecBlocks, ecInfo) {
+    var blocks = [];
+    var offset = 0;
+    for (var i = 0; i < ecInfo.numBlocks1; i++) {
+        blocks.push(dataWords.slice(offset, offset + ecInfo.dataPerBlock1));
+        offset += ecInfo.dataPerBlock1;
+    }
+    for (var i = 0; i < ecInfo.numBlocks2; i++) {
+        blocks.push(dataWords.slice(offset, offset + ecInfo.dataPerBlock2));
+        offset += ecInfo.dataPerBlock2;
+    }
+    var result = [];
+    var maxData = Math.max(ecInfo.dataPerBlock1, ecInfo.dataPerBlock2);
+    for (var i = 0; i < maxData; i++) {
+        for (var j = 0; j < blocks.length; j++) {
+            if (i < blocks[j].length) result.push(blocks[j][i]);
+        }
+    }
+    for (var i = 0; i < ecInfo.ecPerBlock; i++) {
+        for (var j = 0; j < ecBlocks.length; j++) {
+            result.push(ecBlocks[j][i]);
+        }
+    }
+    return result;
+}
+
+function qrRSGenerator(degree) {
+    var result = [1];
+    for (var i = 0; i < degree; i++) {
+        var newResult = new Array(result.length + 1).fill(0);
+        var factor = qrGFExp(i);
+        for (var j = 0; j < result.length; j++) {
+            newResult[j] ^= result[j];
+            newResult[j + 1] ^= qrGFMultiply(result[j], factor);
+        }
+        result = newResult;
+    }
+    return result;
+}
+
+function qrRSDivide(data, generator) {
+    var result = new Array(generator.length - 1).fill(0);
+    for (var i = 0; i < data.length; i++) {
+        var factor = data[i] ^ result[0];
+        result.shift();
+        result.push(0);
+        for (var j = 0; j < result.length; j++) {
+            result[j] ^= qrGFMultiply(generator[j + 1], factor);
+        }
+    }
+    return result;
+}
+
+var _qrExpTable = null, _qrLogTable = null;
+function qrInitGF() {
+    if (_qrExpTable) return;
+    _qrExpTable = new Array(256);
+    _qrLogTable = new Array(256);
+    var x = 1;
+    for (var i = 0; i < 256; i++) {
+        _qrExpTable[i] = x;
+        _qrLogTable[x] = i;
+        x <<= 1;
+        if (x >= 256) x ^= 0x11D;
+    }
+}
+
+function qrGFExp(n) { qrInitGF(); return _qrExpTable[n % 255]; }
+function qrGFMultiply(a, b) {
+    if (a === 0 || b === 0) return 0;
+    qrInitGF();
+    return _qrExpTable[(_qrLogTable[a] + _qrLogTable[b]) % 255];
+}
+
+function qrApplyMask(modules, isFunction, mask, size) {
+    for (var y = 0; y < size; y++) {
+        for (var x = 0; x < size; x++) {
+            if (isFunction[y][x]) continue;
+            var invert = false;
+            switch (mask) {
+                case 0: invert = (y + x) % 2 === 0; break;
+                case 1: invert = y % 2 === 0; break;
+                case 2: invert = x % 3 === 0; break;
+                case 3: invert = (y + x) % 3 === 0; break;
+                case 4: invert = (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0; break;
+                case 5: invert = (y * x) % 2 + (y * x) % 3 === 0; break;
+                case 6: invert = ((y * x) % 2 + (y * x) % 3) % 2 === 0; break;
+                case 7: invert = ((y + x) % 2 + (y * x) % 3) % 2 === 0; break;
+            }
+            if (invert) modules[y][x] = !modules[y][x];
+        }
+    }
+}
+
+function qrPlaceFormatBits(modules, mask, size, version) {
+    var formatBits = qrFormatBits(mask);
+    for (var i = 0; i < 15; i++) {
+        var bit = ((formatBits >> (14 - i)) & 1) === 1;
+        // Around top-left finder.
+        if (i < 6) modules[8][i] = bit;
+        else if (i < 8) modules[8][i + 1] = bit;
+        else if (i < 9) modules[8 - i + 7][8] = bit;
+        else modules[14 - i][8] = bit;
+        // Around bottom-left and top-right finders.
+        if (i < 8) modules[size - 1 - i][8] = bit;
+        else modules[8][size - 15 + i] = bit;
+    }
+    if (version >= 7) {
+        var versionBits = qrVersionBits(version);
+        for (var i = 0; i < 18; i++) {
+            var bit = ((versionBits >> i) & 1) === 1;
+            modules[Math.floor(i / 3)][size - 11 + (i % 3)] = bit;
+            modules[size - 11 + (i % 3)][Math.floor(i / 3)] = bit;
+        }
+    }
+}
+
+function qrFormatBits(mask) {
+    // EC level L = 01, mask pattern 0-7.
+    var data = (1 << 3) | mask; // 01 + mask
+    var rem = data;
+    for (var i = 0; i < 10; i++) rem = (rem << 1) ^ ((rem >> 9) * 0x537);
+    var bits = ((data << 10) | rem) ^ 0x5412;
+    return bits;
+}
+
+function qrVersionBits(version) {
+    var rem = version;
+    for (var i = 0; i < 12; i++) rem = (rem << 1) ^ ((rem >> 11) * 0x1F25);
+    return (version << 12) | rem;
+}
+
+function qrPenalty(modules, size) {
+    var penalty = 0;
+    // Rule 1: consecutive same-color runs.
+    for (var y = 0; y < size; y++) {
+        var run = 1;
+        for (var x = 1; x < size; x++) {
+            if (modules[y][x] === modules[y][x - 1]) { run++; }
+            else { if (run >= 5) penalty += run - 2; run = 1; }
+        }
+        if (run >= 5) penalty += run - 2;
+    }
+    for (var x = 0; x < size; x++) {
+        var run = 1;
+        for (var y = 1; y < size; y++) {
+            if (modules[y][x] === modules[y - 1][x]) { run++; }
+            else { if (run >= 5) penalty += run - 2; run = 1; }
+        }
+        if (run >= 5) penalty += run - 2;
+    }
+    // Rule 2: 2x2 blocks.
+    for (var y = 0; y < size - 1; y++) {
+        for (var x = 0; x < size - 1; x++) {
+            var c = modules[y][x];
+            if (c === modules[y][x + 1] && c === modules[y + 1][x] && c === modules[y + 1][x + 1]) penalty += 3;
+        }
+    }
+    return penalty;
+}

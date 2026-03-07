@@ -385,6 +385,18 @@ func (b *Bridge) onSessionEvent(evt copilot.SessionEvent) {
 			Result:      deref(evt.Data.ToolResult),
 			Success:     derefBool(evt.Data.ToolSuccess),
 		}, sn)
+	case copilot.EventToolProgress:
+		b.broadcastFiltered(MsgToolProgress, ToolProgressPayload{
+			SessionName:     sn,
+			CallID:          deref(evt.Data.ToolCallID),
+			ProgressMessage: deref(evt.Data.ProgressMessage),
+		}, sn)
+	case copilot.EventToolPartialResult:
+		b.broadcastFiltered(MsgToolPartialResult, ToolPartialResultPayload{
+			SessionName:   sn,
+			CallID:        deref(evt.Data.ToolCallID),
+			PartialOutput: deref(evt.Data.PartialOutput),
+		}, sn)
 	case copilot.EventIntentChanged:
 		b.broadcastFiltered(MsgIntentChanged, IntentChangedPayload{
 			SessionName: sn,
@@ -415,6 +427,160 @@ func (b *Bridge) onSessionEvent(evt copilot.SessionEvent) {
 		}, sn)
 	case copilot.EventSessionIdle:
 		b.broadcastSessionsList()
+
+	// --- Subagent lifecycle ---
+
+	case copilot.EventSubagentStart:
+		b.broadcastFiltered(MsgSubagentStarted, SubagentStartedPayload{
+			SessionName:      sn,
+			AgentName:        deref(evt.Data.AgentName),
+			AgentDisplayName: deref(evt.Data.AgentDisplayName),
+			AgentDescription: deref(evt.Data.AgentDescription),
+			ToolCallID:       deref(evt.Data.ParentToolCallID),
+		}, sn)
+	case copilot.EventSubagentComplete:
+		b.broadcastFiltered(MsgSubagentCompleted, SubagentCompletedPayload{
+			SessionName: sn,
+			ToolCallID:  deref(evt.Data.ParentToolCallID),
+			Summary:     deref(evt.Data.Summary),
+		}, sn)
+	case copilot.EventSubagentFailed:
+		b.broadcastFiltered(MsgSubagentFailed, SubagentFailedPayload{
+			SessionName: sn,
+			ToolCallID:  deref(evt.Data.ParentToolCallID),
+			Error:       deref(evt.Data.ErrorMessage),
+		}, sn)
+	case copilot.EventSubagentSelected:
+		b.broadcastFiltered(MsgSubagentSelected, SubagentSelectedPayload{
+			SessionName:      sn,
+			AgentName:        deref(evt.Data.AgentName),
+			AgentDisplayName: deref(evt.Data.AgentDisplayName),
+		}, sn)
+	case copilot.EventSubagentDeselected:
+		b.broadcastFiltered(MsgSubagentDeselected, SubagentDeselectedPayload{
+			SessionName: sn,
+		}, sn)
+
+	// --- Session lifecycle ---
+
+	case copilot.EventTitleChanged:
+		b.broadcastFiltered(MsgTitleChanged, TitleChangedPayload{
+			SessionName: sn,
+			Title:       deref(evt.Data.Title),
+		}, sn)
+		b.broadcastSessionsList()
+	case copilot.EventCompactionStart:
+		b.broadcastFiltered(MsgCompactionStart, CompactionPayload{
+			SessionName: sn,
+		}, sn)
+	case copilot.EventCompactionComplete:
+		b.broadcastFiltered(MsgCompactionComplete, CompactionCompletePayload{
+			SessionName: sn,
+			Success:     derefBool(evt.Data.Success),
+			Summary:     deref(evt.Data.Summary),
+		}, sn)
+	case copilot.EventPlanChanged:
+		b.broadcastFiltered(MsgPlanChanged, PlanChangedPayload{
+			SessionName: sn,
+			Summary:     deref(evt.Data.Summary),
+		}, sn)
+	case copilot.EventTaskComplete:
+		b.broadcastFiltered(MsgTaskComplete, TaskCompletePayload{
+			SessionName: sn,
+			Summary:     deref(evt.Data.Summary),
+		}, sn)
+	case copilot.EventContextChanged:
+		b.broadcastFiltered(MsgContextChanged, TurnPayload{
+			SessionName: sn,
+		}, sn)
+		b.broadcastSessionsList()
+	case copilot.EventModelChange:
+		b.broadcastFiltered(MsgModelChange, ModelChangePayload{
+			SessionName:   sn,
+			NewModel:      deref(evt.Data.NewModel),
+			PreviousModel: deref(evt.Data.PreviousModel),
+		}, sn)
+		b.broadcastSessionsList()
+	case copilot.EventModeChanged:
+		b.broadcastFiltered(MsgModeChanged, ModeChangedPayload{
+			SessionName:  sn,
+			NewMode:      deref(evt.Data.NewMode),
+			PreviousMode: deref(evt.Data.PreviousMode),
+		}, sn)
+	case copilot.EventSessionWarning:
+		b.broadcastFiltered(MsgSessionWarning, SessionWarningPayload{
+			SessionName: sn,
+			WarningType: deref(evt.Data.WarningType),
+			Message:     deref(evt.Data.ErrorMessage),
+		}, sn)
+	case copilot.EventSessionInfo:
+		b.broadcastFiltered(MsgSessionInfo, SessionInfoPayload{
+			SessionName: sn,
+			InfoType:    deref(evt.Data.InfoType),
+			Message:     deref(evt.Data.Content),
+		}, sn)
+
+	// --- User input / elicitation ---
+
+	case copilot.EventUserInputRequested:
+		b.broadcastFiltered(MsgUserInputRequested, UserInputRequestedPayload{
+			SessionName:  sn,
+			RequestID:    deref(evt.Data.RequestID),
+			Question:     deref(evt.Data.Question),
+			Choices:      evt.Data.Choices,
+			AllowFreeform: derefBool(evt.Data.AllowFreeform),
+		}, sn)
+	case copilot.EventUserInputCompleted:
+		b.broadcastFiltered(MsgUserInputCompleted, UserInputCompletedPayload{
+			SessionName: sn,
+			RequestID:   deref(evt.Data.RequestID),
+		}, sn)
+	case copilot.EventElicitationRequested:
+		b.broadcastFiltered(MsgElicitationRequested, ElicitationRequestedPayload{
+			SessionName: sn,
+			RequestID:   deref(evt.Data.RequestID),
+			Message:     deref(evt.Data.Content),
+		}, sn)
+	case copilot.EventElicitationCompleted:
+		b.broadcastFiltered(MsgElicitationCompleted, ElicitationCompletedPayload{
+			SessionName: sn,
+			RequestID:   deref(evt.Data.RequestID),
+		}, sn)
+
+	// --- Permissions ---
+
+	case copilot.EventPermissionRequested:
+		b.broadcastFiltered(MsgPermissionRequested, PermissionRequestedPayload{
+			SessionName:    sn,
+			RequestID:      deref(evt.Data.RequestID),
+			PermissionKind: deref(evt.Data.PermissionKind),
+			ToolName:       deref(evt.Data.PermissionToolName),
+		}, sn)
+	case copilot.EventPermissionCompleted:
+		b.broadcastFiltered(MsgPermissionCompleted, PermissionCompletedPayload{
+			SessionName: sn,
+			RequestID:   deref(evt.Data.RequestID),
+		}, sn)
+
+	// --- Hooks & skills ---
+
+	case copilot.EventHookStart:
+		b.broadcastFiltered(MsgHookStart, HookStartPayload{
+			SessionName: sn,
+			HookID:      deref(evt.Data.HookID),
+			HookType:    deref(evt.Data.HookType),
+		}, sn)
+	case copilot.EventHookEnd:
+		b.broadcastFiltered(MsgHookEnd, HookEndPayload{
+			SessionName: sn,
+			HookID:      deref(evt.Data.HookID),
+			Success:     derefBool(evt.Data.Success),
+		}, sn)
+	case copilot.EventSkillInvoked:
+		b.broadcastFiltered(MsgSkillInvoked, SkillInvokedPayload{
+			SessionName: sn,
+			SkillName:   deref(evt.Data.SkillName),
+		}, sn)
 	}
 }
 

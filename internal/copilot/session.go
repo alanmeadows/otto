@@ -195,6 +195,36 @@ func (s *Session) handleSDKEvent(evt sdk.SessionEvent) {
 			Data:        EventData{ToolCallID: &callID, ToolResult: &result, ToolSuccess: &success},
 		})
 
+	case sdk.ToolExecutionProgress:
+		var callID string
+		if evt.Data.ToolCallID != nil {
+			callID = *evt.Data.ToolCallID
+		}
+		var msg string
+		if evt.Data.ProgressMessage != nil {
+			msg = *evt.Data.ProgressMessage
+		}
+		s.emit(SessionEvent{
+			Type:        EventToolProgress,
+			SessionName: name,
+			Data:        EventData{ToolCallID: &callID, ProgressMessage: &msg},
+		})
+
+	case sdk.ToolExecutionPartialResult:
+		var callID string
+		if evt.Data.ToolCallID != nil {
+			callID = *evt.Data.ToolCallID
+		}
+		var partial string
+		if evt.Data.PartialOutput != nil {
+			partial = *evt.Data.PartialOutput
+		}
+		s.emit(SessionEvent{
+			Type:        EventToolPartialResult,
+			SessionName: name,
+			Data:        EventData{ToolCallID: &callID, PartialOutput: &partial},
+		})
+
 	case sdk.AssistantReasoningDelta:
 		if evt.Data.ReasoningText != nil {
 			content := *evt.Data.ReasoningText
@@ -253,6 +283,339 @@ func (s *Session) handleSDKEvent(evt sdk.SessionEvent) {
 			SessionName: name,
 			Data:        EventData{ErrorMessage: &errMsg},
 		})
+
+	// --- Subagent lifecycle ---
+
+	case sdk.SubagentStarted:
+		var agentName, displayName, desc, toolCallID string
+		if evt.Data.AgentName != nil {
+			agentName = *evt.Data.AgentName
+		}
+		if evt.Data.AgentDisplayName != nil {
+			displayName = *evt.Data.AgentDisplayName
+		}
+		if evt.Data.AgentDescription != nil {
+			desc = *evt.Data.AgentDescription
+		}
+		if evt.Data.ToolCallID != nil {
+			toolCallID = *evt.Data.ToolCallID
+		}
+		s.emit(SessionEvent{
+			Type:        EventSubagentStart,
+			SessionName: name,
+			Data: EventData{
+				AgentName:        &agentName,
+				AgentDisplayName: &displayName,
+				AgentDescription: &desc,
+				ParentToolCallID: &toolCallID,
+			},
+		})
+
+	case sdk.SubagentCompleted:
+		var toolCallID string
+		if evt.Data.ToolCallID != nil {
+			toolCallID = *evt.Data.ToolCallID
+		}
+		var summary string
+		if evt.Data.Summary != nil {
+			summary = *evt.Data.Summary
+		}
+		s.emit(SessionEvent{
+			Type:        EventSubagentComplete,
+			SessionName: name,
+			Data:        EventData{ParentToolCallID: &toolCallID, Summary: &summary},
+		})
+
+	case sdk.SubagentFailed:
+		var toolCallID string
+		if evt.Data.ToolCallID != nil {
+			toolCallID = *evt.Data.ToolCallID
+		}
+		var errMsg string
+		if evt.Data.Error != nil {
+			errMsg = fmt.Sprintf("%v", *evt.Data.Error)
+		}
+		s.emit(SessionEvent{
+			Type:        EventSubagentFailed,
+			SessionName: name,
+			Data:        EventData{ParentToolCallID: &toolCallID, ErrorMessage: &errMsg},
+		})
+
+	case sdk.SubagentSelected:
+		var agentName, displayName string
+		if evt.Data.AgentName != nil {
+			agentName = *evt.Data.AgentName
+		}
+		if evt.Data.AgentDisplayName != nil {
+			displayName = *evt.Data.AgentDisplayName
+		}
+		s.emit(SessionEvent{
+			Type:        EventSubagentSelected,
+			SessionName: name,
+			Data:        EventData{AgentName: &agentName, AgentDisplayName: &displayName},
+		})
+
+	case sdk.SubagentDeselected:
+		s.emit(SessionEvent{Type: EventSubagentDeselected, SessionName: name})
+
+	// --- Session lifecycle ---
+
+	case sdk.SessionTitleChanged:
+		var title string
+		if evt.Data.Title != nil {
+			title = *evt.Data.Title
+		}
+		s.emit(SessionEvent{
+			Type:        EventTitleChanged,
+			SessionName: name,
+			Data:        EventData{Title: &title},
+		})
+
+	case sdk.SessionCompactionStart:
+		s.emit(SessionEvent{Type: EventCompactionStart, SessionName: name})
+
+	case sdk.SessionCompactionComplete:
+		success := true
+		if evt.Data.Success != nil {
+			success = *evt.Data.Success
+		}
+		var summary string
+		if evt.Data.SummaryContent != nil {
+			summary = *evt.Data.SummaryContent
+		}
+		s.emit(SessionEvent{
+			Type:        EventCompactionComplete,
+			SessionName: name,
+			Data:        EventData{Success: &success, Summary: &summary},
+		})
+
+	case sdk.SessionPlanChanged:
+		var summary string
+		if evt.Data.Summary != nil {
+			summary = *evt.Data.Summary
+		}
+		s.emit(SessionEvent{
+			Type:        EventPlanChanged,
+			SessionName: name,
+			Data:        EventData{Summary: &summary},
+		})
+
+	case sdk.SessionTaskComplete:
+		var summary string
+		if evt.Data.Summary != nil {
+			summary = *evt.Data.Summary
+		}
+		s.emit(SessionEvent{
+			Type:        EventTaskComplete,
+			SessionName: name,
+			Data:        EventData{Summary: &summary},
+		})
+
+	case sdk.SessionContextChanged:
+		s.emit(SessionEvent{Type: EventContextChanged, SessionName: name})
+
+	case sdk.SessionModelChange:
+		var newModel, prevModel string
+		if evt.Data.NewModel != nil {
+			newModel = *evt.Data.NewModel
+		}
+		if evt.Data.PreviousModel != nil {
+			prevModel = *evt.Data.PreviousModel
+		}
+		s.emit(SessionEvent{
+			Type:        EventModelChange,
+			SessionName: name,
+			Data:        EventData{NewModel: &newModel, PreviousModel: &prevModel},
+		})
+
+	case sdk.SessionModeChanged:
+		var newMode, prevMode string
+		if evt.Data.NewMode != nil {
+			newMode = *evt.Data.NewMode
+		}
+		if evt.Data.PreviousMode != nil {
+			prevMode = *evt.Data.PreviousMode
+		}
+		s.emit(SessionEvent{
+			Type:        EventModeChanged,
+			SessionName: name,
+			Data:        EventData{NewMode: &newMode, PreviousMode: &prevMode},
+		})
+
+	case sdk.SessionWarning:
+		var warnType, msg string
+		if evt.Data.WarningType != nil {
+			warnType = *evt.Data.WarningType
+		}
+		if evt.Data.Message != nil {
+			msg = *evt.Data.Message
+		}
+		s.emit(SessionEvent{
+			Type:        EventSessionWarning,
+			SessionName: name,
+			Data:        EventData{WarningType: &warnType, ErrorMessage: &msg},
+		})
+
+	case sdk.SessionInfo:
+		var infoType, msg string
+		if evt.Data.InfoType != nil {
+			infoType = *evt.Data.InfoType
+		}
+		if evt.Data.Message != nil {
+			msg = *evt.Data.Message
+		}
+		s.emit(SessionEvent{
+			Type:        EventSessionInfo,
+			SessionName: name,
+			Data:        EventData{InfoType: &infoType, Content: &msg},
+		})
+
+	// --- User input / elicitation ---
+
+	case sdk.UserInputRequested:
+		var reqID, question string
+		var choices []string
+		allowFreeform := true
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		if evt.Data.Question != nil {
+			question = *evt.Data.Question
+		}
+		if evt.Data.Message != nil && question == "" {
+			question = *evt.Data.Message
+		}
+		if evt.Data.Choices != nil {
+			choices = evt.Data.Choices
+		}
+		if evt.Data.AllowFreeform != nil {
+			allowFreeform = *evt.Data.AllowFreeform
+		}
+		s.emit(SessionEvent{
+			Type:        EventUserInputRequested,
+			SessionName: name,
+			Data: EventData{
+				RequestID:    &reqID,
+				Question:     &question,
+				Choices:      choices,
+				AllowFreeform: &allowFreeform,
+			},
+		})
+
+	case sdk.UserInputCompleted:
+		var reqID string
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		s.emit(SessionEvent{
+			Type:        EventUserInputCompleted,
+			SessionName: name,
+			Data:        EventData{RequestID: &reqID},
+		})
+
+	case sdk.ElicitationRequested:
+		var reqID, msg string
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		if evt.Data.Message != nil {
+			msg = *evt.Data.Message
+		}
+		s.emit(SessionEvent{
+			Type:        EventElicitationRequested,
+			SessionName: name,
+			Data:        EventData{RequestID: &reqID, Content: &msg},
+		})
+
+	case sdk.ElicitationCompleted:
+		var reqID string
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		s.emit(SessionEvent{
+			Type:        EventElicitationCompleted,
+			SessionName: name,
+			Data:        EventData{RequestID: &reqID},
+		})
+
+	// --- Permissions ---
+
+	case sdk.PermissionRequested:
+		var reqID, kind, toolName string
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		if evt.Data.PermissionRequest != nil {
+			kind = string(evt.Data.PermissionRequest.Kind)
+		}
+		if evt.Data.ToolName != nil {
+			toolName = *evt.Data.ToolName
+		}
+		s.emit(SessionEvent{
+			Type:        EventPermissionRequested,
+			SessionName: name,
+			Data: EventData{
+				RequestID:          &reqID,
+				PermissionKind:     &kind,
+				PermissionToolName: &toolName,
+			},
+		})
+
+	case sdk.PermissionCompleted:
+		var reqID string
+		if evt.Data.RequestID != nil {
+			reqID = *evt.Data.RequestID
+		}
+		s.emit(SessionEvent{
+			Type:        EventPermissionCompleted,
+			SessionName: name,
+			Data:        EventData{RequestID: &reqID},
+		})
+
+	// --- Hooks & skills ---
+
+	case sdk.HookStart:
+		var hookID, hookType string
+		if evt.Data.HookInvocationID != nil {
+			hookID = *evt.Data.HookInvocationID
+		}
+		if evt.Data.HookType != nil {
+			hookType = *evt.Data.HookType
+		}
+		s.emit(SessionEvent{
+			Type:        EventHookStart,
+			SessionName: name,
+			Data:        EventData{HookID: &hookID, HookType: &hookType},
+		})
+
+	case sdk.HookEnd:
+		var hookID string
+		if evt.Data.HookInvocationID != nil {
+			hookID = *evt.Data.HookInvocationID
+		}
+		success := true
+		if evt.Data.Success != nil {
+			success = *evt.Data.Success
+		}
+		s.emit(SessionEvent{
+			Type:        EventHookEnd,
+			SessionName: name,
+			Data:        EventData{HookID: &hookID, Success: &success},
+		})
+
+	case sdk.SkillInvoked:
+		var skillName string
+		if evt.Data.Name != nil {
+			skillName = *evt.Data.Name
+		}
+		s.emit(SessionEvent{
+			Type:        EventSkillInvoked,
+			SessionName: name,
+			Data:        EventData{SkillName: &skillName},
+		})
+
+	default:
+		slog.Debug("unhandled SDK event", "type", evt.Type, "session", name)
 	}
 }
 

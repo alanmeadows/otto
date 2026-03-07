@@ -146,6 +146,14 @@ The tunnel is managed via bgtask so it survives otto restarts. Otto monitors the
 
 The dashboard is a responsive web UI embedded in the otto binary. It connects to the Copilot SDK to manage sessions and streams events in real time via WebSocket.
 
+The Copilot CLI embeds its own copilot server that Otto cannot connect to — so Otto reads session event logs from disk and runs its own server for interactive sessions. This creates three session modes:
+
+- **Watch** — tail a live CLI session in real time (read-only)
+- **Fork** — copy a session's history into a new writable session on Otto's server
+- **Resume** — reconnect to a previously idle session with full interaction
+
+See [docs/architecture.md](docs/architecture.md) for the full explanation and architecture diagram.
+
 ### Copilot Server
 
 Otto automatically starts and manages a headless Copilot server via bgtask on port 4321. This server handles all LLM interactions for both the dashboard and PR monitoring. It uses `--no-auto-update` to avoid corrupting `~/.copilot/pkg/` while other CLI sessions are running.

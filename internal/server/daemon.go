@@ -141,7 +141,7 @@ func forkDaemon(port int, logDir string) (*forkResult, error) {
 	}
 
 	cmd := exec.Command(os.Args[0], forkArgs...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.SysProcAttr = daemonSysProcAttr()
 
 	// Redirect output to log file.
 	f, err := os.OpenFile(logFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

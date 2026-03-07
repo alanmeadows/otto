@@ -50,6 +50,44 @@ const (
 	MsgDashboardConfig      = "dashboard_config"
 	MsgWatchHistory         = "watch_history"
 	MsgWatchEvent           = "watch_event"
+
+	// Subagent lifecycle.
+	MsgSubagentStarted     = "subagent_started"
+	MsgSubagentCompleted   = "subagent_completed"
+	MsgSubagentFailed      = "subagent_failed"
+	MsgSubagentSelected    = "subagent_selected"
+	MsgSubagentDeselected  = "subagent_deselected"
+
+	// Tool progress.
+	MsgToolProgress      = "tool_progress"
+	MsgToolPartialResult = "tool_partial_result"
+
+	// Session lifecycle.
+	MsgTitleChanged      = "title_changed"
+	MsgCompactionStart   = "compaction_start"
+	MsgCompactionComplete = "compaction_complete"
+	MsgPlanChanged       = "plan_changed"
+	MsgTaskComplete      = "task_complete"
+	MsgContextChanged    = "context_changed"
+	MsgModelChange       = "model_change"
+	MsgModeChanged       = "mode_changed"
+	MsgSessionWarning    = "session_warning"
+	MsgSessionInfo       = "session_info"
+
+	// User input / elicitation.
+	MsgUserInputRequested    = "user_input_requested"
+	MsgUserInputCompleted    = "user_input_completed"
+	MsgElicitationRequested  = "elicitation_requested"
+	MsgElicitationCompleted  = "elicitation_completed"
+
+	// Permissions.
+	MsgPermissionRequested = "permission_requested"
+	MsgPermissionCompleted = "permission_completed"
+
+	// Hooks & skills.
+	MsgHookStart    = "hook_start"
+	MsgHookEnd      = "hook_end"
+	MsgSkillInvoked = "skill_invoked"
 )
 
 // Client → Server message types.
@@ -234,4 +272,172 @@ type AllowedUsersListPayload struct {
 
 type DashboardConfigPayload struct {
 	OwnerNickname string `json:"owner_nickname"`
+}
+
+// ---------------------------------------------------------------------------
+// Subagent payloads
+// ---------------------------------------------------------------------------
+
+type SubagentStartedPayload struct {
+	SessionName      string `json:"session_name"`
+	AgentName        string `json:"agent_name"`
+	AgentDisplayName string `json:"agent_display_name"`
+	AgentDescription string `json:"agent_description"`
+	ToolCallID       string `json:"tool_call_id"`
+}
+
+type SubagentCompletedPayload struct {
+	SessionName string `json:"session_name"`
+	ToolCallID  string `json:"tool_call_id"`
+	Summary     string `json:"summary"`
+}
+
+type SubagentFailedPayload struct {
+	SessionName string `json:"session_name"`
+	ToolCallID  string `json:"tool_call_id"`
+	Error       string `json:"error"`
+}
+
+type SubagentSelectedPayload struct {
+	SessionName      string `json:"session_name"`
+	AgentName        string `json:"agent_name"`
+	AgentDisplayName string `json:"agent_display_name"`
+}
+
+type SubagentDeselectedPayload struct {
+	SessionName string `json:"session_name"`
+}
+
+// ---------------------------------------------------------------------------
+// Tool progress payloads
+// ---------------------------------------------------------------------------
+
+type ToolProgressPayload struct {
+	SessionName     string `json:"session_name"`
+	CallID          string `json:"call_id"`
+	ProgressMessage string `json:"progress_message"`
+}
+
+type ToolPartialResultPayload struct {
+	SessionName   string `json:"session_name"`
+	CallID        string `json:"call_id"`
+	PartialOutput string `json:"partial_output"`
+}
+
+// ---------------------------------------------------------------------------
+// Session lifecycle payloads
+// ---------------------------------------------------------------------------
+
+type TitleChangedPayload struct {
+	SessionName string `json:"session_name"`
+	Title       string `json:"title"`
+}
+
+type CompactionPayload struct {
+	SessionName string `json:"session_name"`
+}
+
+type CompactionCompletePayload struct {
+	SessionName string `json:"session_name"`
+	Success     bool   `json:"success"`
+	Summary     string `json:"summary"`
+}
+
+type PlanChangedPayload struct {
+	SessionName string `json:"session_name"`
+	Summary     string `json:"summary"`
+}
+
+type TaskCompletePayload struct {
+	SessionName string `json:"session_name"`
+	Summary     string `json:"summary"`
+}
+
+type ModelChangePayload struct {
+	SessionName   string `json:"session_name"`
+	NewModel      string `json:"new_model"`
+	PreviousModel string `json:"previous_model"`
+}
+
+type ModeChangedPayload struct {
+	SessionName  string `json:"session_name"`
+	NewMode      string `json:"new_mode"`
+	PreviousMode string `json:"previous_mode"`
+}
+
+type SessionWarningPayload struct {
+	SessionName string `json:"session_name"`
+	WarningType string `json:"warning_type"`
+	Message     string `json:"message"`
+}
+
+type SessionInfoPayload struct {
+	SessionName string `json:"session_name"`
+	InfoType    string `json:"info_type"`
+	Message     string `json:"message"`
+}
+
+// ---------------------------------------------------------------------------
+// User input / elicitation payloads
+// ---------------------------------------------------------------------------
+
+type UserInputRequestedPayload struct {
+	SessionName  string   `json:"session_name"`
+	RequestID    string   `json:"request_id"`
+	Question     string   `json:"question"`
+	Choices      []string `json:"choices,omitempty"`
+	AllowFreeform bool    `json:"allow_freeform"`
+}
+
+type UserInputCompletedPayload struct {
+	SessionName string `json:"session_name"`
+	RequestID   string `json:"request_id"`
+}
+
+type ElicitationRequestedPayload struct {
+	SessionName  string   `json:"session_name"`
+	RequestID    string   `json:"request_id"`
+	Message      string   `json:"message"`
+}
+
+type ElicitationCompletedPayload struct {
+	SessionName string `json:"session_name"`
+	RequestID   string `json:"request_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Permission payloads
+// ---------------------------------------------------------------------------
+
+type PermissionRequestedPayload struct {
+	SessionName    string `json:"session_name"`
+	RequestID      string `json:"request_id"`
+	PermissionKind string `json:"permission_kind"`
+	ToolName       string `json:"tool_name"`
+}
+
+type PermissionCompletedPayload struct {
+	SessionName string `json:"session_name"`
+	RequestID   string `json:"request_id"`
+}
+
+// ---------------------------------------------------------------------------
+// Hook & skill payloads
+// ---------------------------------------------------------------------------
+
+type HookStartPayload struct {
+	SessionName string `json:"session_name"`
+	HookID      string `json:"hook_id"`
+	HookType    string `json:"hook_type"`
+}
+
+type HookEndPayload struct {
+	SessionName string `json:"session_name"`
+	HookID      string `json:"hook_id"`
+	Success     bool   `json:"success"`
+}
+
+type SkillInvokedPayload struct {
+	SessionName string `json:"session_name"`
+	SkillName   string `json:"skill_name"`
 }

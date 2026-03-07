@@ -48,6 +48,44 @@ const (
 	EventUsageInfo     EventType = "usage_info"
 	EventReasoningDelta EventType = "reasoning_delta"
 	EventUserMessage    EventType = "user_message"
+
+	// Subagent lifecycle.
+	EventSubagentStart      EventType = "subagent_start"
+	EventSubagentComplete   EventType = "subagent_complete"
+	EventSubagentFailed     EventType = "subagent_failed"
+	EventSubagentSelected   EventType = "subagent_selected"
+	EventSubagentDeselected EventType = "subagent_deselected"
+
+	// Tool progress.
+	EventToolProgress      EventType = "tool_progress"
+	EventToolPartialResult EventType = "tool_partial_result"
+
+	// Session lifecycle.
+	EventTitleChanged      EventType = "title_changed"
+	EventCompactionStart   EventType = "compaction_start"
+	EventCompactionComplete EventType = "compaction_complete"
+	EventPlanChanged       EventType = "plan_changed"
+	EventTaskComplete      EventType = "task_complete"
+	EventContextChanged    EventType = "context_changed"
+	EventModelChange       EventType = "model_change"
+	EventModeChanged       EventType = "mode_changed"
+	EventSessionWarning    EventType = "session_warning"
+	EventSessionInfo       EventType = "session_info"
+
+	// User input / elicitation.
+	EventUserInputRequested     EventType = "user_input_requested"
+	EventUserInputCompleted     EventType = "user_input_completed"
+	EventElicitationRequested   EventType = "elicitation_requested"
+	EventElicitationCompleted   EventType = "elicitation_completed"
+
+	// Permissions.
+	EventPermissionRequested  EventType = "permission_requested"
+	EventPermissionCompleted  EventType = "permission_completed"
+
+	// Hooks & skills.
+	EventHookStart    EventType = "hook_start"
+	EventHookEnd      EventType = "hook_end"
+	EventSkillInvoked EventType = "skill_invoked"
 )
 
 // SessionEvent represents an event emitted by a copilot session.
@@ -71,4 +109,42 @@ type EventData struct {
 	InputTokens  *int    `json:"input_tokens,omitempty"`
 	OutputTokens *int    `json:"output_tokens,omitempty"`
 	ErrorMessage *string `json:"error_message,omitempty"`
+
+	// Subagent fields.
+	AgentName        *string `json:"agent_name,omitempty"`
+	AgentDisplayName *string `json:"agent_display_name,omitempty"`
+	AgentDescription *string `json:"agent_description,omitempty"`
+	ParentToolCallID *string `json:"parent_tool_call_id,omitempty"`
+	Summary          *string `json:"summary,omitempty"`
+
+	// Tool progress fields.
+	ProgressMessage *string `json:"progress_message,omitempty"`
+	PartialOutput   *string `json:"partial_output,omitempty"`
+
+	// Session lifecycle fields.
+	Title         *string `json:"title,omitempty"`
+	NewModel      *string `json:"new_model,omitempty"`
+	PreviousModel *string `json:"previous_model,omitempty"`
+	NewMode       *string `json:"new_mode,omitempty"`
+	PreviousMode  *string `json:"previous_mode,omitempty"`
+	WarningType   *string `json:"warning_type,omitempty"`
+	InfoType      *string `json:"info_type,omitempty"`
+	Success       *bool   `json:"success,omitempty"`
+
+	// User input / elicitation fields.
+	RequestID    *string  `json:"request_id,omitempty"`
+	Question     *string  `json:"question,omitempty"`
+	Choices      []string `json:"choices,omitempty"`
+	AllowFreeform *bool   `json:"allow_freeform,omitempty"`
+
+	// Permission fields.
+	PermissionKind     *string `json:"permission_kind,omitempty"`
+	PermissionToolName *string `json:"permission_tool_name,omitempty"`
+
+	// Hook fields.
+	HookID   *string `json:"hook_id,omitempty"`
+	HookType *string `json:"hook_type,omitempty"`
+
+	// Skill fields.
+	SkillName *string `json:"skill_name,omitempty"`
 }

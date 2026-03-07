@@ -480,6 +480,114 @@ body {
 }
 .tool-group.expanded .tool-group-body { display: block; }
 
+/* Subagent groups (similar to tool groups but distinct styling) */
+.subagent-group {
+    align-self: flex-start;
+    max-width: 85%;
+    margin: 4px 0;
+}
+.subagent-group-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    border-left: 3px solid var(--accent);
+}
+.subagent-group-header:hover { background: var(--bg-hover); }
+.subagent-group-header .subagent-group-icon { transition: transform 0.15s; }
+.subagent-group.expanded .subagent-group-icon { transform: rotate(90deg); }
+.subagent-group-header.has-running { border-left-color: var(--yellow); }
+.subagent-group-header.has-failed { border-left-color: var(--red); }
+.subagent-group-body {
+    display: none;
+    padding: 2px 0 2px 12px;
+}
+.subagent-group.expanded .subagent-group-body { display: block; }
+
+.subagent-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent);
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 2px 0;
+    align-self: flex-start;
+    max-width: 85%;
+}
+.subagent-indicator.running { border-left-color: var(--yellow); }
+.subagent-indicator.completed { border-left-color: var(--green); }
+.subagent-indicator.failed { border-left-color: var(--red); }
+.subagent-indicator .subagent-name { color: var(--accent); font-weight: 500; }
+
+/* Session info banners (compaction, model change, warnings, etc.) */
+.session-banner {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    margin: 4px 0;
+    align-self: center;
+    max-width: 90%;
+}
+.session-banner.info {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent);
+}
+.session-banner.warning {
+    background: color-mix(in srgb, var(--yellow) 12%, transparent);
+    color: var(--yellow);
+}
+.session-banner.success {
+    background: color-mix(in srgb, var(--green) 12%, transparent);
+    color: var(--green);
+}
+
+/* User input / elicitation cards (read-only display) */
+.user-input-card {
+    align-self: flex-start;
+    max-width: 85%;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--yellow);
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 4px 0;
+}
+.user-input-card.resolved {
+    border-left-color: var(--green);
+    opacity: 0.6;
+}
+.user-input-card .uic-question {
+    font-weight: 500;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+.user-input-card .uic-choices {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 4px;
+}
+.user-input-card .uic-choice {
+    padding: 2px 8px;
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+}
+
 /* Streaming cursor */
 .streaming-cursor::after {
     content: '▊';
@@ -642,6 +750,14 @@ body {
 .tunnel-settings input, .tunnel-settings select {
     font-size: 12px;
     padding: 4px 8px;
+}
+.tunnel-qr {
+    display: flex;
+    justify-content: center;
+    padding: 8px 0;
+}
+.tunnel-qr canvas {
+    border-radius: var(--radius-sm);
 }
 
 /* Utility */

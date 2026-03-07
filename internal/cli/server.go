@@ -31,8 +31,8 @@ var noPRMonitoringFlag bool
 var dashboardPortFlag int
 var noTunnelFlag bool
 var upgradeChannelFlag string
-var insecureFlag bool
-var openDashboardFlag bool
+var insecureTunnelFlag bool
+var insecureDashboardFlag bool
 
 func init() {
 	serverCmd.AddCommand(serverStartCmd)
@@ -49,8 +49,8 @@ func init() {
 	serverStartCmd.Flags().BoolVar(&noPRMonitoringFlag, "no-pr-monitoring", false, "Disable PR monitoring loop")
 	serverStartCmd.Flags().IntVar(&dashboardPortFlag, "dashboard-port", 0, "Dashboard port (default from config or 4098)")
 	serverStartCmd.Flags().BoolVar(&noTunnelFlag, "no-tunnel", false, "Disable Azure DevTunnel for dashboard")
-	serverStartCmd.Flags().BoolVar(&insecureFlag, "insecure", false, "Launch tunnel without authentication (anonymous access)")
-	serverStartCmd.Flags().BoolVar(&openDashboardFlag, "open-dashboard", false, "Disable dashboard passcode requirement (fully open)")
+	serverStartCmd.Flags().BoolVar(&insecureTunnelFlag, "insecure-tunnel", false, "Launch tunnel without authentication (anonymous access)")
+	serverStartCmd.Flags().BoolVar(&insecureDashboardFlag, "insecure-dashboard", false, "Disable dashboard passcode requirement (fully open)")
 	serverUpgradeCmd.Flags().StringVar(&upgradeChannelFlag, "channel", "", "Upgrade channel: \"release\" (default) or \"main\" (build from source)")
 }
 
@@ -72,8 +72,8 @@ PR polling loop (dashboard-only mode).`,
   otto server start --no-dashboard
   otto server start --no-tunnel
   otto server start --no-pr-monitoring
-  otto server start --insecure
-  otto server start --insecure --open-dashboard`,
+  otto server start --insecure-tunnel
+  otto server start --insecure-tunnel --insecure-dashboard`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		port := portFlag
 		if port == 0 {
@@ -107,20 +107,20 @@ PR polling loop (dashboard-only mode).`,
 			os.Setenv("OTTO_NO_TUNNEL", "1")
 		}
 
-		// --insecure: set tunnel to anonymous access.
-		if insecureFlag {
+		// --insecure-tunnel: set tunnel to anonymous access.
+		if insecureTunnelFlag {
 			appConfig.Dashboard.TunnelAccess = "anonymous"
 			os.Setenv("OTTO_TUNNEL_ACCESS", "anonymous")
-			fmt.Fprintln(cmd.ErrOrStderr(), "⚠️  WARNING: --insecure mode enabled. The tunnel is open to anyone on the internet.")
+			fmt.Fprintln(cmd.ErrOrStderr(), "⚠️  WARNING: --insecure-tunnel mode enabled. The tunnel is open to anyone on the internet.")
 			fmt.Fprintln(cmd.ErrOrStderr(), "   Anyone with the URL can access the dashboard. Use only on trusted networks.")
 		}
 
-		// --open-dashboard: disable passcode requirement.
-		if openDashboardFlag {
+		// --insecure-dashboard: disable passcode requirement.
+		if insecureDashboardFlag {
 			f := false
 			appConfig.Dashboard.RequireKey = &f
 			os.Setenv("OTTO_OPEN_DASHBOARD", "1")
-			fmt.Fprintln(cmd.ErrOrStderr(), "⚠️  WARNING: --open-dashboard mode enabled. Dashboard passcode is DISABLED.")
+			fmt.Fprintln(cmd.ErrOrStderr(), "⚠️  WARNING: --insecure-dashboard mode enabled. Dashboard passcode is DISABLED.")
 			fmt.Fprintln(cmd.ErrOrStderr(), "   Anyone who can reach the dashboard URL has full access. This is NOT recommended.")
 		}
 		if dashboardPortFlag > 0 {

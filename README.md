@@ -15,7 +15,7 @@ Otto solves three problems:
 
 Otto's web dashboard discovers all your Copilot CLI sessions from `~/.copilot/session-state/`, shows their live status, and lets you resume and interact with them from any browser. Start a session at your desk, pick it up from your phone on the couch. Protected by a secret access key via Azure DevTunnels.
 
-![Otto Dashboard showing saved sessions with activity timestamps](docs/images/dashboard-sessions.png)
+![Otto Dashboard — server start and status with tunnel URL](docs/images/dashboard-sessions.gif)
 
 ### 🔍 Guided PR reviews with a single command
 
@@ -26,7 +26,7 @@ otto pr review https://dev.azure.com/org/project/_git/repo/pullrequest/123 \
 
 Not a generic "find bugs" review — you tell otto what to focus on and it applies that lens across the entire diff. Otto checks out the full repo so the LLM can read surrounding code for context, not just the diff. It then presents review comments in a table and lets you interactively select which to post as inline comments on the PR.
 
-![PR review table showing severity, file, line, and comment](docs/images/pr-review-table.png)
+![PR review with severity table and inline comment posting](docs/images/pr-review-table.gif)
 
 ### 🤖 Hands-off PR lifecycle management
 
@@ -36,7 +36,7 @@ otto pr add https://dev.azure.com/org/project/_git/repo/pullrequest/123
 
 Otto watches your PR continuously. When a pipeline fails, it reads the build logs, classifies the failure (infrastructure vs code), and fixes it. When a reviewer leaves comments, it evaluates each one, fixes the code if it agrees, and replies with its reasoning. When merge conflicts appear, it rebases and resolves them. When MerlinBot flags policy issues, it addresses them. All while you're working on something else.
 
-![otto pr list showing tracked PRs with stage status](docs/images/pr-list-terminal.png)
+![otto pr add and pr list showing tracked PRs with stage status](docs/images/pr-list-terminal.gif)
 
 The goal: submit a PR and let otto get it to green without you babysitting it.
 

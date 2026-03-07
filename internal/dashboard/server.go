@@ -86,7 +86,12 @@ func NewServer(cfg *config.Config) *Server {
 	tmgr.SetStatusHandler(func(running bool, url string) {
 		keyedURL := ""
 		if running && url != "" {
-			keyedURL = url + "?key=" + dashKey
+			// When require_key is false (open dashboard), don't append the key.
+			if cfg.Dashboard.RequireKey != nil && !*cfg.Dashboard.RequireKey {
+				keyedURL = url
+			} else {
+				keyedURL = url + "?key=" + dashKey
+			}
 			slog.Info("tunnel connected, dashboard available remotely", "url", url)
 		}
 		bridge.BroadcastTunnelStatus(running, url, keyedURL)
@@ -254,6 +259,12 @@ func (s *Server) Start(ctx context.Context, port int) error {
 	}()
 
 	slog.Info("dashboard server listening", "bind", "http://0.0.0.0:"+strconv.Itoa(port))
+	if s.cfg.Dashboard.TunnelAccess == "anonymous" {
+		slog.Warn("⚠️  INSECURE: tunnel is open to anonymous access — anyone with the URL can reach the dashboard")
+	}
+	if s.cfg.Dashboard.RequireKey != nil && !*s.cfg.Dashboard.RequireKey {
+		slog.Warn("⚠️  INSECURE: dashboard passcode is DISABLED — no authentication required for remote access")
+	}
 	if err := s.srv.ListenAndServe(); err != http.ErrServerClosed {
 		return fmt.Errorf("dashboard server error: %w", err)
 	}
@@ -648,11 +659,17 @@ func writeJSON(w http.ResponseWriter, v any) {
 const dashboardKeyCookie = "otto_key"
 
 // isDashboardAccessAllowed checks if the request has the correct dashboard key.
-// Local requests are always allowed. Remote requests need ?key= or cookie.
+// Local requests are always allowed. Remote requests need ?key= or cookie,
+// unless require_key is set to false in config (--open-dashboard).
 func (s *Server) isDashboardAccessAllowed(r *http.Request) bool {
 	// Local access — always allowed.
 	host := r.Host
 	if strings.HasPrefix(host, "localhost") || strings.HasPrefix(host, "127.0.0.1") || strings.HasPrefix(host, "[::1]") {
+		return true
+	}
+
+	// Open dashboard mode: skip key check entirely.
+	if s.cfg.Dashboard.RequireKey != nil && !*s.cfg.Dashboard.RequireKey {
 		return true
 	}
 

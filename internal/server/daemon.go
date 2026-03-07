@@ -300,6 +300,13 @@ func runForeground(port int, logDir string) error {
 	if os.Getenv("OTTO_NO_PR_MONITORING") == "1" {
 		cfg.Server.NoPRMonitoring = true
 	}
+	if os.Getenv("OTTO_TUNNEL_ACCESS") != "" {
+		cfg.Dashboard.TunnelAccess = os.Getenv("OTTO_TUNNEL_ACCESS")
+	}
+	if os.Getenv("OTTO_OPEN_DASHBOARD") == "1" {
+		f := false
+		cfg.Dashboard.RequireKey = &f
+	}
 
 	// Write PID file for foreground mode too (for status checks).
 	if err := writePIDFile(os.Getpid()); err != nil {

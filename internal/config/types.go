@@ -115,6 +115,7 @@ type DashboardConfig struct {
 	OwnerEmail      string   `json:"owner_email"`           // dashboard owner email (auto-detected from tunnel JWT if empty)
 	OwnerNickname   string   `json:"owner_nickname"`        // display name for session owner in chat bubbles (default: "owner")
 	AllowedUsers    []string `json:"allowed_users"`         // emails allowed full dashboard access (e.g. ["alice@microsoft.com"])
+	RequireKey      *bool    `json:"require_key,omitempty"` // require passcode for remote dashboard access (default: true)
 
 	// Runtime-only fields (set by CLI flags or server startup, not persisted).
 	Enabled         bool   `json:"-"` // controlled by --no-dashboard

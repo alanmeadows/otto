@@ -238,9 +238,15 @@ func (m *Manager) discoverBgtaskURL() string {
 		return ""
 	}
 	var info struct {
-		ChildAlive bool `json:"child_alive"`
+		Status struct {
+			State   string `json:"state"`
+			Running *struct {
+				ChildPID int `json:"child_pid"`
+			} `json:"running"`
+		} `json:"status"`
 	}
-	if json.Unmarshal(out, &info) != nil || !info.ChildAlive {
+	if json.Unmarshal(out, &info) != nil || info.Status.State != "running" ||
+		info.Status.Running == nil || info.Status.Running.ChildPID <= 0 {
 		return ""
 	}
 

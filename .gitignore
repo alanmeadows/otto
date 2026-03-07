@@ -47,3 +47,4 @@ demo.md
 # Ignore showboat screenshot artifacts in root, but keep docs/images/
 /*.png
 !docs/images/*.png
+*.tgz

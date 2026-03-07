@@ -36,7 +36,9 @@ Copy this URL and open it on your phone or any browser. The key is embedded in t
 
 The first visit with `?key=` sets a browser cookie (30 days) and redirects to a clean URL — subsequent visits don't need the key.
 
-When the tunnel is active, the dashboard sidebar shows a **QR code** you can scan to open the dashboard on your phone instantly.
+### QR Code
+
+When the tunnel is active, the **Tunnel** section at the bottom of the dashboard sidebar shows a scannable QR code. The QR encodes the full authenticated tunnel URL (`?key=` included), so scanning it with your phone camera opens the dashboard and logs you in — no copy-pasting needed.
 
 ## Dashboard Access Control
 

@@ -235,6 +235,8 @@ On start, otto logs an access URL with an embedded secret key:
 tunnel connected — dashboard available remotely  url=https://xxxx-4098.usw3.devtunnels.ms?key=a8f3b2c1...
 ```
 
+Once connected, the **Tunnel** section in the dashboard sidebar shows a scannable **QR code** — scan it with your phone camera to open the dashboard instantly, no copy-pasting required. The QR encodes the full authenticated URL so you're logged in immediately.
+
 If devtunnel or bgtask aren't installed, otto logs a warning with install instructions and continues without the tunnel. Use `otto server status` to see all active endpoints including the tunnel URL.
 
 See [docs/tunnel.md](docs/tunnel.md) for the full setup guide.

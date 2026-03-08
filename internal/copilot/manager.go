@@ -326,6 +326,9 @@ func (m *Manager) SendPrompt(ctx context.Context, name, prompt string) error {
 	}
 	retryErr := s.SendPrompt(ctx, prompt)
 	if retryErr == nil || !isSessionExpired(retryErr) {
+		if retryErr == nil {
+			m.emitSystemInfo(name, "Session was idle too long and expired. It was automatically resumed.")
+		}
 		return retryErr
 	}
 
@@ -342,12 +345,26 @@ func (m *Manager) SendPrompt(ctx context.Context, name, prompt string) error {
 		return retryErr
 	}
 
+	m.emitSystemInfo(name, "Session expired and could not be resumed. It was rebuilt with your conversation history intact.")
+
 	// Final retry with the rebuilt session.
 	s = m.GetSession(name)
 	if s == nil {
 		return fmt.Errorf("session %q lost during rebuild", name)
 	}
 	return s.SendPrompt(ctx, prompt)
+}
+
+// emitSystemInfo sends an informational event to the dashboard for a session.
+func (m *Manager) emitSystemInfo(sessionName, message string) {
+	if m.onEvent != nil {
+		infoType := "recovery"
+		m.onEvent(SessionEvent{
+			Type:        EventSessionInfo,
+			SessionName: sessionName,
+			Data:        EventData{InfoType: &infoType, Content: &message},
+		})
+	}
 }
 
 // isSessionExpired checks if an error indicates the SDK session was

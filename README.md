@@ -404,30 +404,7 @@ otto                          LLM-powered PR lifecycle manager
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│ otto server start                                           │
-│                                                             │
-│  ┌──────────────────┐   ┌───────────────────────────────┐   │
-│  │ PR API (:4097)   │   │ Dashboard (:4098)             │   │
-│  │ PR monitoring    │   │ Web UI + WebSocket streaming  │   │
-│  │ Auto-fix/review  │   │ Session sharing (token-gated) │   │
-│  └──────────────────┘   └───────────────┬───────────────┘   │
-│                                         │                   │
-│  ┌──────────────────────────────────────┴───────────────┐   │
-│  │ Copilot Session Manager (copilot-sdk/go)             │   │
-│  │ Create · Resume · Stream · Share                     │   │
-│  │ Persisted session discovery (~/.copilot/session-state)│   │
-│  └──────────────────────────────────────────────────────┘   │
-│                                                             │
-│  ┌──────────────────────────────────────────────────────┐   │
-│  │ DevTunnel Manager (via bgtask)                       │   │
-│  │ Tunnel survives otto restarts · auto-restart always  │   │
-│  │ Health monitor auto-recovers stale connections       │   │
-│  │ Entra ID / GitHub org / anonymous access control     │   │
-│  └──────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
+![Otto high-level architecture](docs/images/otto-architecture.png)
 
 All LLM interaction goes through the [GitHub Copilot SDK for Go](https://github.com/github/copilot-sdk).
 

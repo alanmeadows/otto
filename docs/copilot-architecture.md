@@ -68,23 +68,6 @@ otto config set dashboard.copilot_server localhost:5000
 
 ## Session Mode Flow
 
-```
-CLI session running in terminal
-        │
-        ▼
-   events.jsonl (on disk)
-        │
-        ├──► Watch (read-only, real-time)
-        │         │
-        │         └──► Fork (creates writable copy on Otto's server)
-        │
-        ▼
-   Session goes idle
-        │
-        ▼
-   Saved Sessions list
-        │
-        └──► Resume (reconnect via Otto's server)
-```
+The diagram at the top of this document illustrates the full data flow. A typical usage pattern:
 
 A typical flow: you start a Copilot session at your desk, otto discovers it and you **watch** it from your phone. The agent asks a question you want to answer — you **fork** the session and respond. Later, the forked session goes idle and you close your browser. The next morning you open the dashboard and **resume** it to continue.

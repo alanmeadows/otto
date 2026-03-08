@@ -33,7 +33,7 @@ func ensureCopilotServer() (string, error) {
 
 	// Check if the bgtask copilot server is already running.
 	if url := discoverCopilotServer(port); url != "" {
-		slog.Info("attached to existing copilot server", "url", url)
+		slog.Info("attached to existing otto-managed copilot server", "url", url)
 		return url, nil
 	}
 
@@ -43,11 +43,10 @@ func ensureCopilotServer() (string, error) {
 		return "", fmt.Errorf("copilot CLI not found in PATH. Install with: npm install -g @github/copilot")
 	}
 
-	// Check if something else is already listening on the port.
+	// If something else is listening on our port, warn and pick a different one.
 	if isPortOpen(port) {
-		url := fmt.Sprintf("localhost:%d", port)
-		slog.Info("copilot server already listening", "url", url)
-		return url, nil
+		slog.Warn("port is in use by an unmanaged process, starting on alternate port", "blocked_port", port)
+		port = port + 100 // e.g. 4421
 	}
 
 	// Remove stale bgtask state.

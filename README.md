@@ -150,7 +150,7 @@ The Copilot CLI embeds its own copilot server that Otto cannot connect to — so
 - **Fork** — copy a session's history into a new writable session on Otto's server
 - **Resume** — reconnect to a previously idle session with full interaction
 
-See [docs/architecture.md](docs/architecture.md) for the full explanation and architecture diagram.
+See [docs/copilot-architecture.md](docs/copilot-architecture.md) for the full explanation and architecture diagram.
 
 ### Copilot Server
 

@@ -105,10 +105,6 @@ function handleMessage(msg) {
     switch (msg.type) {
         case 'sessions_list': handleSessionsList(msg.payload); break;
         case 'session_history':
-            if (state._nextHistoryAppendOnly) {
-                msg.payload._appendOnly = true;
-                state._nextHistoryAppendOnly = false;
-            }
             handleSessionHistory(msg.payload); break;
         case 'content_delta': handleContentDelta(msg.payload); break;
         case 'tool_started': handleToolStarted(msg.payload); break;
@@ -202,27 +198,21 @@ function handleSessionHistory(payload) {
     const container = document.getElementById('chat-messages');
     const messages = (payload.messages || []).filter(msg => msg.content && msg.content.trim());
 
-    // Clean up any pending message that might still be showing.
+    // Clean up any pending message placeholder.
     const pending = document.getElementById('pending-message');
     if (pending) pending.remove();
 
-    if (payload._appendOnly) {
-        // Only append messages we haven't rendered yet.
-        const newMessages = messages.slice(state.renderedMessageCount);
-        newMessages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
-    } else {
-        container.innerHTML = '';
-        messages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
-    }
+    // Full refresh: clear and re-render canonical history.
+    // Preserve scroll position if user is scrolled up.
+    const wasAtBottom = !state.userScrolledUp;
+    container.innerHTML = '';
+    messages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
     state.renderedMessageCount = messages.length;
-    scrollToBottom();
-}
-
-function fetchAndAppendNew(sessionName) {
-    // We'll handle this by sending get_history and marking it as append-only
-    // via a one-shot flag.
-    state._nextHistoryAppendOnly = true;
-    send('get_history', { session_name: sessionName });
+    if (wasAtBottom) {
+        state.userScrolledUp = false;
+        const el = document.getElementById('chat-messages');
+        requestAnimationFrame(() => { el.scrollTop = el.scrollHeight; });
+    }
 }
 
 function handleContentDelta(payload) {
@@ -280,16 +270,16 @@ function handleTurnEnd(payload) {
     if (state.streamingContent[key]) {
         finalizeStreamingMessage();
         delete state.streamingContent[key];
-    } else if (payload.session_name === state.activeSession) {
-        // No streaming deltas were received — the response came as a complete
-        // assistant.message. Fetch history and append only new messages
-        // (without clearing existing tool indicators and content).
-        fetchAndAppendNew(payload.session_name);
     }
-    updateSessionState(payload.session_name, 'idle');
+
     if (payload.session_name === state.activeSession) {
+        // Always refresh from history on turn end to prevent duplicates
+        // and ordering issues. Tool indicators from the completed turn
+        // are replaced by the canonical history.
+        send('get_history', { session_name: payload.session_name });
         showActivity(false);
     }
+    updateSessionState(payload.session_name, 'idle');
     updateSessionMessageCount(payload.session_name);
 }
 
@@ -393,8 +383,6 @@ function handleUserMessage(payload) {
     }
 
     appendChatMessage('user', payload.content, false);
-    // Keep renderedMessageCount in sync so fetchAndAppendNew (turn_end
-    // fallback) doesn't re-render this message from the history slice.
     state.renderedMessageCount++;
 }
 

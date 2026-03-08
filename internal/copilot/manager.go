@@ -144,11 +144,16 @@ func (m *Manager) CreateSession(ctx context.Context, name, model, workingDir str
 	// Load MCP servers from ~/.copilot/mcp-config.json for CLI parity.
 	if mcpServers := loadMCPConfig(); mcpServers != nil {
 		cfg.MCPServers = mcpServers
-		if m.serverURL != "" {
-			slog.Warn("MCP servers configured but using shared copilot server. MCP may not work unless the shared server is recent. Remove dashboard.copilot_server to use embedded mode.", "server", m.serverURL, "mcp_count", len(mcpServers))
-		}
 		for name := range mcpServers {
 			slog.Info("configuring MCP server for session", "server", name)
+		}
+	}
+
+	// Load skill directories from installed plugins for CLI parity.
+	if skillDirs := loadSkillDirectories(); len(skillDirs) > 0 {
+		cfg.SkillDirectories = skillDirs
+		for _, dir := range skillDirs {
+			slog.Info("configuring skill directory for session", "dir", dir)
 		}
 	}
 
@@ -705,6 +710,47 @@ func loadMCPConfig() map[string]sdk.MCPServerConfig {
 		slog.Info("loaded MCP servers from ~/.copilot/mcp-config.json", "count", len(raw.MCPServers))
 	}
 	return raw.MCPServers
+}
+
+// loadSkillDirectories discovers skill directories from installed plugins
+// at ~/.copilot/installed-plugins/. Each plugin with a "skills" subdirectory
+// gets added to SkillDirectories so the copilot server can load them.
+func loadSkillDirectories() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	pluginsDir := filepath.Join(home, ".copilot", "installed-plugins")
+	entries, err := os.ReadDir(pluginsDir)
+	if err != nil {
+		return nil
+	}
+
+	var dirs []string
+	// Walk two levels: installed-plugins/<marketplace>/<plugin>/skills
+	for _, marketplace := range entries {
+		if !marketplace.IsDir() {
+			continue
+		}
+		plugins, err := os.ReadDir(filepath.Join(pluginsDir, marketplace.Name()))
+		if err != nil {
+			continue
+		}
+		for _, plugin := range plugins {
+			if !plugin.IsDir() {
+				continue
+			}
+			skillsDir := filepath.Join(pluginsDir, marketplace.Name(), plugin.Name(), "skills")
+			if info, err := os.Stat(skillsDir); err == nil && info.IsDir() {
+				dirs = append(dirs, skillsDir)
+			}
+		}
+	}
+
+	if len(dirs) > 0 {
+		slog.Info("loaded skill directories from ~/.copilot/installed-plugins", "count", len(dirs))
+	}
+	return dirs
 }
 
 // SessionSearchResult represents a single search hit across session history.

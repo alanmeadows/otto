@@ -694,6 +694,14 @@ func loadMCPConfig() map[string]sdk.MCPServerConfig {
 		return nil
 	}
 	if len(raw.MCPServers) > 0 {
+		// Ensure every server has a "tools" field — the copilot server
+		// rejects servers without one.
+		for name, cfg := range raw.MCPServers {
+			if _, hasTools := cfg["tools"]; !hasTools {
+				cfg["tools"] = []string{"*"}
+				raw.MCPServers[name] = cfg
+			}
+		}
 		slog.Info("loaded MCP servers from ~/.copilot/mcp-config.json", "count", len(raw.MCPServers))
 	}
 	return raw.MCPServers

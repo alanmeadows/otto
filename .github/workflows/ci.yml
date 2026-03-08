@@ -72,6 +72,9 @@ jobs:
 
   test-e2e:
     runs-on: ubuntu-latest
+    # E2E tests require rodney (private repo) — skip in CI for now.
+    # Run locally with: make test-e2e
+    if: false
     steps:
       - uses: actions/checkout@v6
 

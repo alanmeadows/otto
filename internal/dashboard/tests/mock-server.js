@@ -80,9 +80,72 @@ const sessions = [
 // Conversation history (grows as messages are sent)
 let history = [];
 let processing = false;
+let processingQueue = false;
+const messageQueue = [];
 
 function sendJSON(ws, type, payload) {
     ws.send(JSON.stringify({ type, payload }));
+}
+
+// Broadcast to all connected clients.
+function broadcastJSON(type, payload) {
+    const data = JSON.stringify({ type, payload });
+    wss.clients.forEach(c => { if (c.readyState === 1) c.send(data); });
+}
+
+// Process queued messages sequentially with realistic delays.
+function processNextMessage() {
+    if (messageQueue.length === 0) {
+        processingQueue = false;
+        return;
+    }
+    processingQueue = true;
+    const { prompt, sessionName } = messageQueue.shift();
+
+    // Broadcast user message immediately.
+    broadcastJSON('user_message', { session_name: sessionName, content: prompt });
+    history.push({ role: 'user', content: prompt, timestamp: new Date().toISOString() });
+
+    processing = true;
+    sessions[0].is_processing = true;
+    sessions[0].state = 'processing';
+    broadcastJSON('sessions_list', { sessions, active_session: sessionName });
+    broadcastJSON('turn_start', { session_name: sessionName });
+
+    // Simulate tool call + response.
+    setTimeout(() => {
+        const callId = 'call-' + Date.now();
+        broadcastJSON('tool_started', {
+            session_name: sessionName,
+            tool_name: 'bash',
+            call_id: callId,
+            tool_input: JSON.stringify({ command: 'echo test' }),
+        });
+
+        setTimeout(() => {
+            broadcastJSON('tool_completed', {
+                session_name: sessionName,
+                call_id: callId,
+                result: 'test\n',
+                success: true,
+            });
+
+            const response = 'This is a test response to: ' + prompt;
+            broadcastJSON('content_delta', { session_name: sessionName, content: response });
+            history.push({ role: 'assistant', content: response, timestamp: new Date().toISOString() });
+
+            setTimeout(() => {
+                processing = false;
+                sessions[0].is_processing = false;
+                sessions[0].state = 'idle';
+                sessions[0].message_count = history.length;
+                broadcastJSON('turn_end', { session_name: sessionName });
+                broadcastJSON('sessions_list', { sessions, active_session: sessionName });
+                // Process next queued message.
+                processNextMessage();
+            }, 100);
+        }, 200);
+    }, 300);
 }
 
 wss.on('connection', (ws) => {
@@ -111,52 +174,11 @@ wss.on('connection', (ws) => {
                 const prompt = msg.payload.prompt;
                 const sessionName = msg.payload.session_name;
 
-                // Broadcast user message
-                sendJSON(ws, 'user_message', { session_name: sessionName, content: prompt });
-                history.push({ role: 'user', content: prompt, timestamp: new Date().toISOString() });
-
-                // Mark processing
-                processing = true;
-                sessions[0].is_processing = true;
-                sessions[0].state = 'processing';
-                sendJSON(ws, 'sessions_list', { sessions, active_session: sessionName });
-                sendJSON(ws, 'turn_start', { session_name: sessionName });
-
-                // Simulate tool call + response after a short delay
-                setTimeout(() => {
-                    const callId = 'call-' + Date.now();
-                    sendJSON(ws, 'tool_started', {
-                        session_name: sessionName,
-                        tool_name: 'bash',
-                        call_id: callId,
-                        tool_input: JSON.stringify({ command: 'echo test' }),
-                    });
-
-                    setTimeout(() => {
-                        sendJSON(ws, 'tool_completed', {
-                            session_name: sessionName,
-                            call_id: callId,
-                            result: 'test\n',
-                            success: true,
-                        });
-
-                        // Stream response
-                        const response = 'This is a test response to: ' + prompt;
-                        sendJSON(ws, 'content_delta', { session_name: sessionName, content: response });
-
-                        history.push({ role: 'assistant', content: response, timestamp: new Date().toISOString() });
-
-                        // End turn
-                        setTimeout(() => {
-                            processing = false;
-                            sessions[0].is_processing = false;
-                            sessions[0].state = 'idle';
-                            sessions[0].message_count = history.length;
-                            sendJSON(ws, 'turn_end', { session_name: sessionName });
-                            sendJSON(ws, 'sessions_list', { sessions, active_session: sessionName });
-                        }, 100);
-                    }, 200);
-                }, 300);
+                // Server-side queue: add to queue, process sequentially.
+                messageQueue.push({ prompt, sessionName, ws });
+                if (!processingQueue) {
+                    processNextMessage();
+                }
                 break;
             }
 

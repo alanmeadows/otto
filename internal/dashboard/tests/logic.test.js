@@ -79,6 +79,16 @@ describe('reconcileHistory', () => {
         assert.deepEqual(result.rendered, []);
         assert.deepEqual(result.pendingPrompts, []);
     });
+
+    test('preserves multiple pending when only some appear in history', () => {
+        const messages = [
+            { role: 'user', content: 'a' },
+            { role: 'assistant', content: 'resp-a' },
+        ];
+        const pending = ['a', 'b', 'c'];
+        const result = reconcileHistory(messages, pending);
+        assert.deepEqual(result.pendingPrompts, ['b', 'c']);
+    });
 });
 
 // --- confirmUserMessage ---
@@ -105,6 +115,16 @@ describe('confirmUserMessage', () => {
     test('handles empty pending array', () => {
         const result = confirmUserMessage([], 'hello');
         assert.deepEqual(result, []);
+    });
+
+    test('processes multiple queued confirmations in order', () => {
+        let pending = ['msg-A', 'msg-B', 'msg-C'];
+        pending = confirmUserMessage(pending, 'msg-A');
+        assert.deepEqual(pending, ['msg-B', 'msg-C']);
+        pending = confirmUserMessage(pending, 'msg-B');
+        assert.deepEqual(pending, ['msg-C']);
+        pending = confirmUserMessage(pending, 'msg-C');
+        assert.deepEqual(pending, []);
     });
 });
 

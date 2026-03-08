@@ -218,6 +218,70 @@ rodney waitstable 2>/dev/null
 
 # ============================================================
 echo ""
+echo "=== Test Suite: Multiple Queued Messages ==="
+
+# Send 3 messages rapidly — they should all queue and be processed sequentially.
+rodney click '#chat-input' 2>/dev/null
+rodney input '#chat-input' 'Queue msg A' 2>/dev/null
+rodney click '#send-btn' 2>/dev/null
+sleep 0.3
+
+rodney click '#chat-input' 2>/dev/null
+rodney input '#chat-input' 'Queue msg B' 2>/dev/null
+rodney click '#send-btn' 2>/dev/null
+# If choice bar appears, click Queue
+sleep 0.3
+if rodney exists '#choice-queue' 2>/dev/null | grep -q "true"; then
+    rodney click '#choice-queue' 2>/dev/null
+fi
+sleep 0.3
+
+rodney click '#chat-input' 2>/dev/null
+rodney input '#chat-input' 'Queue msg C' 2>/dev/null
+rodney click '#send-btn' 2>/dev/null
+sleep 0.3
+if rodney exists '#choice-queue' 2>/dev/null | grep -q "true"; then
+    rodney click '#choice-queue' 2>/dev/null
+fi
+
+# Wait for all 3 to be processed (each takes ~600ms in mock)
+sleep 5
+rodney waitstable 2>/dev/null
+
+# All 3 messages should appear in history with responses
+QUEUE_A=$(rodney text '#chat-messages' 2>/dev/null | grep -c "Queue msg A" || echo "0")
+QUEUE_B=$(rodney text '#chat-messages' 2>/dev/null | grep -c "Queue msg B" || echo "0")
+QUEUE_C=$(rodney text '#chat-messages' 2>/dev/null | grep -c "Queue msg C" || echo "0")
+
+if [ "$QUEUE_A" -ge 1 ]; then
+    pass "Queued message A delivered"
+else
+    fail "Queued message A delivered" "not found in chat"
+fi
+if [ "$QUEUE_B" -ge 1 ]; then
+    pass "Queued message B delivered"
+else
+    fail "Queued message B delivered" "not found in chat"
+fi
+if [ "$QUEUE_C" -ge 1 ]; then
+    pass "Queued message C delivered"
+else
+    fail "Queued message C delivered" "not found in chat"
+fi
+
+# Verify correct ordering: A before B before C
+ALL_TEXT=$(rodney text '#chat-messages' 2>/dev/null)
+POS_A=$(echo "$ALL_TEXT" | grep -n "Queue msg A" | head -1 | cut -d: -f1)
+POS_B=$(echo "$ALL_TEXT" | grep -n "Queue msg B" | head -1 | cut -d: -f1)
+POS_C=$(echo "$ALL_TEXT" | grep -n "Queue msg C" | head -1 | cut -d: -f1)
+if [ -n "$POS_A" ] && [ -n "$POS_B" ] && [ -n "$POS_C" ] && [ "$POS_A" -lt "$POS_B" ] && [ "$POS_B" -lt "$POS_C" ]; then
+    pass "Queued messages delivered in order (A < B < C)"
+else
+    fail "Queued messages delivered in order" "positions: A=$POS_A B=$POS_B C=$POS_C"
+fi
+
+# ============================================================
+echo ""
 echo "=== Results ==="
 echo "Tests: $TESTS, Passed: $((TESTS - FAILURES)), Failed: $FAILURES"
 

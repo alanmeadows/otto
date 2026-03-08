@@ -22,6 +22,14 @@ type CommentResponse struct {
 	FixDescription string `json:"fix_description,omitempty"`
 }
 
+// aiFooter returns the AI disclosure footer if enabled, or empty string.
+func aiFooter(cfg *config.Config) string {
+	if cfg != nil && cfg.PR.DisableAIFooter {
+		return ""
+	}
+	return provider.AIFooter
+}
+
 // evaluateComment processes a new review comment on a tracked PR.
 // It creates an LLM session in the provided workDir, evaluates the comment,
 // and takes appropriate action. Returns true if code changes were committed
@@ -75,7 +83,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 	if err != nil {
 		// Fallback: post the raw response as a reply.
 		slog.Warn("failed to parse comment response JSON, posting raw reply", "error", err)
-		if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, content); err != nil {
+		if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, content+aiFooter(cfg)); err != nil {
 			slog.Warn("failed to reply to comment", "error", err, "threadID", comment.ThreadID)
 		}
 		return false, nil
@@ -83,7 +91,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 
 	// Reply to the comment.
 	if commentResp.Reply != "" {
-		if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, commentResp.Reply); err != nil {
+		if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, commentResp.Reply+aiFooter(cfg)); err != nil {
 			slog.Warn("failed to reply to comment", "error", err)
 		}
 	}
@@ -100,7 +108,7 @@ func evaluateComment(ctx context.Context, pr *PRDocument, comment provider.Comme
 			slog.Warn("no changes to commit for AGREE decision", "error", err)
 		} else {
 			committed = true
-			if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, fmt.Sprintf("Fixed in %s", commitHash)); err != nil {
+			if err := backend.ReplyToComment(ctx, prInfo, comment.ThreadID, fmt.Sprintf("Fixed in %s", commitHash)+aiFooter(cfg)); err != nil {
 				slog.Warn("failed to reply to comment", "error", err, "threadID", comment.ThreadID)
 			}
 		}

@@ -483,7 +483,7 @@ Provide a concise, structured diagnosis that another LLM can use to fix the code
 
 	if pr.FixAttempts >= pr.MaxFixAttempts {
 		pr.Status = "failed"
-		_ = backend.PostComment(ctx, prInfo, fmt.Sprintf("Exhausted %d fix attempts for this PR. Manual intervention required.", pr.MaxFixAttempts))
+		_ = backend.PostComment(ctx, prInfo, fmt.Sprintf("Exhausted %d fix attempts for this PR. Manual intervention required.", pr.MaxFixAttempts)+aiFooter(cfg))
 		// Notification ownership: FixPR is the sole owner of EventPRFailed notifications.
 		// pollSinglePR must NOT send duplicate failure notifications.
 		if err := Notify(ctx, &cfg.Notifications, NotificationPayload{
@@ -1346,7 +1346,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 				slog.Warn("failed to apply MerlinBot fix", "prID", pr.ID, "threadID", eval.ThreadID, "error", err)
 				continue
 			}
-			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, fmt.Sprintf("Fixed: %s", eval.Action)); err != nil {
+			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, fmt.Sprintf("Fixed: %s", eval.Action)+aiFooter(cfg)); err != nil {
 				slog.Warn("failed to reply to MerlinBot thread", "prID", pr.ID, "threadID", eval.ThreadID, "error", err)
 			}
 			if err := backend.ResolveComment(ctx, prInfo, eval.ThreadID, provider.ResolutionFixed); err != nil {
@@ -1354,7 +1354,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 			}
 
 		case "WONT_FIX":
-			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, eval.Reason); err != nil {
+			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, eval.Reason+aiFooter(cfg)); err != nil {
 				slog.Warn("failed to reply to MerlinBot thread", "prID", pr.ID, "threadID", eval.ThreadID, "error", err)
 			}
 			if err := backend.ResolveComment(ctx, prInfo, eval.ThreadID, provider.ResolutionWontFix); err != nil {
@@ -1362,7 +1362,7 @@ func handleMerlinBotDaemon(ctx context.Context, pr *PRDocument, comments []provi
 			}
 
 		case "BY_DESIGN":
-			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, eval.Reason); err != nil {
+			if err := backend.ReplyToComment(ctx, prInfo, eval.ThreadID, eval.Reason+aiFooter(cfg)); err != nil {
 				slog.Warn("failed to reply to MerlinBot thread", "prID", pr.ID, "threadID", eval.ThreadID, "error", err)
 			}
 			if err := backend.ResolveComment(ctx, prInfo, eval.ThreadID, provider.ResolutionByDesign); err != nil {

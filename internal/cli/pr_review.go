@@ -206,7 +206,7 @@ in the worker pool".`,
 
 		// Step 10: Post approved comments via backend.PostInlineComment().
 		fmt.Fprintf(cmd.OutOrStdout(), "Posting %d comments...\n", len(selected))
-		posted, err := postReviewComments(ctx, cmd.OutOrStdout(), backend, prInfo, comments, selected)
+		posted, err := postReviewComments(ctx, cmd.OutOrStdout(), backend, prInfo, comments, selected, appConfig.PR.DisableAIFooter)
 		if err != nil {
 			return fmt.Errorf("posting comments: %w", err)
 		}
@@ -217,14 +217,18 @@ in the worker pool".`,
 }
 
 // postReviewComments posts the selected inline comments to the PR.
-func postReviewComments(ctx context.Context, w io.Writer, backend provider.PRBackend, prInfo *provider.PRInfo, comments []reviewComment, selected []int) (int, error) {
+func postReviewComments(ctx context.Context, w io.Writer, backend provider.PRBackend, prInfo *provider.PRInfo, comments []reviewComment, selected []int, disableFooter bool) (int, error) {
 	posted := 0
 	for _, idx := range selected {
 		c := comments[idx]
+		body := c.Body
+		if !disableFooter {
+			body += provider.AIFooter
+		}
 		inline := provider.InlineComment{
 			FilePath: c.File,
 			Line:     c.Line,
-			Body:     c.Body,
+			Body:     body,
 			Side:     "right",
 		}
 		if err := backend.PostInlineComment(ctx, prInfo, inline); err != nil {

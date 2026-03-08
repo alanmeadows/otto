@@ -19,7 +19,7 @@ const state = {
     tunnelURL: '',
     ownerNickname: 'owner',
     userScrolledUp: false,  // true when user has scrolled away from bottom
-    pendingPrompt: null,    // prompt text awaiting server broadcast
+    pendingPrompts: [],    // prompts awaiting server broadcast
 };
 
 // --- WebSocket ---
@@ -205,15 +205,10 @@ function handleSessionHistory(payload) {
     state.renderedMessageCount = messages.length;
 
     // Re-add pending messages that haven't appeared in history yet.
-    if (state.pendingPrompt) {
-        const alreadyInHistory = messages.some(m => m.role === 'user' && m.content === state.pendingPrompt);
-        if (alreadyInHistory) {
-            state.pendingPrompt = null;
-        } else {
-            const s = state.sessions.find(s => s.name === state.activeSession);
-            const isQueued = s && s.is_processing;
-            appendPendingMessage(state.pendingPrompt, isQueued);
-        }
+    if (state.pendingPrompts.length > 0) {
+        const historyContents = new Set(messages.filter(m => m.role === 'user').map(m => m.content));
+        state.pendingPrompts = state.pendingPrompts.filter(p => !historyContents.has(p));
+        state.pendingPrompts.forEach(p => appendPendingMessage(p, true));
     }
 
     if (wasAtBottom) {
@@ -384,11 +379,12 @@ function handleReasoningDelta(payload) {
 function handleUserMessage(payload) {
     if (payload.session_name !== state.activeSession) return;
 
-    // Check if this message matches a pending prompt.
-    if (state.pendingPrompt && payload.content === state.pendingPrompt) {
-        state.pendingPrompt = null;
+    // Remove this message from pending queue if present.
+    const idx = state.pendingPrompts.indexOf(payload.content);
+    if (idx >= 0) {
+        state.pendingPrompts.splice(idx, 1);
     }
-    const pending = document.getElementById('pending-message');
+    const pending = document.getElementById('pending-' + hashStr(payload.content));
     if (pending) pending.remove();
 
     appendChatMessage('user', payload.content, false);
@@ -1720,6 +1716,14 @@ function esc(str) {
     return div.innerHTML;
 }
 
+function hashStr(str) {
+    var h = 0;
+    for (var i = 0; i < str.length; i++) {
+        h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+    }
+    return Math.abs(h).toString(36);
+}
+
 function timeAgo(isoStr) {
     if (!isoStr) return '';
     const then = new Date(isoStr);
@@ -1750,7 +1754,7 @@ function selectSession(name) {
     state._watchingSession = null;
     state.renderedMessageCount = 0;
     state.userScrolledUp = false;
-    state.pendingPrompt = null;
+    state.pendingPrompts = [];
     showNewMessagesPill(false);
     // Restore interactive mode (in case we were watching).
     document.getElementById('chat-input').disabled = false;
@@ -1843,7 +1847,7 @@ function sendMessage() {
 
 function doSendMessage(prompt) {
     send('send_message', { session_name: state.activeSession, prompt });
-    state.pendingPrompt = prompt;
+    state.pendingPrompts.push(prompt);
     appendPendingMessage(prompt, false);
 
     const input = document.getElementById('chat-input');
@@ -1869,7 +1873,7 @@ function showInterruptQueueChoice(prompt) {
 
     document.getElementById('choice-queue').onclick = function() {
         div.remove();
-        state.pendingPrompt = prompt;
+        state.pendingPrompts.push(prompt);
         appendPendingMessage(prompt, true);
         send('send_message', { session_name: state.activeSession, prompt });
         document.getElementById('chat-input').value = '';
@@ -1890,7 +1894,7 @@ function appendPendingMessage(content, queued) {
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'message user pending';
-    div.id = 'pending-message';
+    div.id = 'pending-' + hashStr(content);
     const label = queued ? 'Queued' : 'Sending';
     div.innerHTML = '<div class="message-sender owner">' + esc(state.ownerNickname) + '</div>' +
         renderMarkdown(content) +

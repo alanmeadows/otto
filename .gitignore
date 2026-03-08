@@ -48,3 +48,4 @@ demo.md
 /*.png
 !docs/images/*.png
 *.tgz
+node_modules/

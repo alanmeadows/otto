@@ -1,7 +1,7 @@
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 
-.PHONY: all build test lint vet install clean regenerate-all
+.PHONY: all build test test-js test-e2e lint vet install clean regenerate-all
 
 all: lint vet test build
 
@@ -10,6 +10,12 @@ build:
 
 test:
 	go test ./... -timeout 120s
+
+test-js:
+	node --test internal/dashboard/tests/logic.test.js
+
+test-e2e:
+	./internal/dashboard/tests/e2e.sh
 
 lint:
 	@which golangci-lint > /dev/null 2>&1 && golangci-lint run || echo "golangci-lint not found, skipping"

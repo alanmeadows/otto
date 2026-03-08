@@ -1111,20 +1111,26 @@ function renderFixTimeline(body) {
 function parseTimelineDetails(block) {
     if (!block) return '';
     const lines = block.split('\n').filter(l => l.trim().startsWith('-'));
-    if (lines.length === 0) return '<div class="timeline-detail">' + escapeHtml(block.substring(0, 200)) + '</div>';
+    if (lines.length === 0) return '';
     let html = '<div class="timeline-details">';
+    let hasContent = false;
     lines.forEach(line => {
         const cleaned = line.replace(/^-\s*/, '');
-        // Try to parse **Key**: Value
         const kvMatch = cleaned.match(/^\*\*(.+?)\*\*:\s*(.+)$/);
         if (kvMatch) {
-            html += `<div class="timeline-kv"><span class="timeline-key">${escapeHtml(kvMatch[1])}</span> ${escapeHtml(kvMatch[2])}</div>`;
-        } else {
+            const key = kvMatch[1];
+            const value = kvMatch[2].trim();
+            // Skip useless values: markdown headings, empty, or just "Pending"
+            if (value.startsWith('##') || value === '' || value === 'Pending') return;
+            html += `<div class="timeline-kv"><span class="timeline-key">${escapeHtml(key)}</span> ${escapeHtml(value)}</div>`;
+            hasContent = true;
+        } else if (cleaned.trim()) {
             html += `<div class="timeline-kv">${escapeHtml(cleaned)}</div>`;
+            hasContent = true;
         }
     });
     html += '</div>';
-    return html;
+    return hasContent ? html : '';
 }
 
 function formatTimelineDate(str) {

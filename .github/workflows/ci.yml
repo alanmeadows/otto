@@ -57,3 +57,41 @@ jobs:
 
       - name: go vet
         run: go vet ./...
+
+  test-js:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Dashboard unit tests
+        run: make test-js
+
+  test-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install ws dependency
+        run: npm install --no-save ws
+        working-directory: internal/dashboard/tests
+
+      - name: Install rodney
+        run: go install github.com/philsphicas/rodney/cmd/rodney@latest
+
+      - name: Install Chrome
+        uses: browser-actions/setup-chrome@latest
+
+      - name: Dashboard E2E tests
+        run: make test-e2e

@@ -20,6 +20,9 @@ type Bridge struct {
 	mu            sync.RWMutex
 	nextID        int
 	ownerNickname     string
+	messageQueues     map[string]chan string // session name -> queued prompts
+	mqMu              sync.Mutex
+	serverCtx         context.Context // long-lived context for queue workers
 	onStartTunnel     func()
 	onStopTunnel      func()
 	onListWorktrees   func() []WorktreeSummary
@@ -41,12 +44,14 @@ type wsClient struct {
 }
 
 // NewBridge creates a Bridge wired to the given copilot Manager.
-// Call this after the Manager is created; it registers the event handler.
-func NewBridge(mgr *copilot.Manager, ownerNickname string) *Bridge {
+// serverCtx should be the long-lived server context (not per-client).
+func NewBridge(mgr *copilot.Manager, ownerNickname string, serverCtx context.Context) *Bridge {
 	b := &Bridge{
 		manager:       mgr,
 		clients:       make(map[string]*wsClient),
 		ownerNickname: ownerNickname,
+		messageQueues: make(map[string]chan string),
+		serverCtx:     serverCtx,
 	}
 	mgr.SetEventHandler(b.onSessionEvent)
 	return b
@@ -184,14 +189,7 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 			sessionName = client.sessionFilter
 		}
 		go func() {
-			if err := b.manager.SendPrompt(ctx, sessionName, p.Prompt); err != nil {
-				slog.Warn("send prompt failed", "session", sessionName, "error", err)
-				b.broadcastFiltered(MsgSessionError, ErrorPayload{
-					SessionName: sessionName,
-					Message:     err.Error(),
-				}, sessionName)
-				b.broadcastSessionsList()
-			}
+			b.enqueueMessage(sessionName, p.Prompt)
 		}()
 
 	case MsgAbortSession:
@@ -768,6 +766,53 @@ func (b *Bridge) BroadcastTunnelStatus(running bool, url string, keyedURL ...str
 // BroadcastWorktrees sends the worktrees list to all clients.
 func (b *Bridge) BroadcastWorktrees(worktrees []WorktreeSummary) {
 	b.broadcast(MsgWorktreesList, WorktreesListPayload{Worktrees: worktrees})
+}
+
+// enqueueMessage adds a prompt to the server-side queue for a session.
+// Messages are delivered sequentially, surviving client disconnects.
+func (b *Bridge) enqueueMessage(sessionName, prompt string) {
+	b.mqMu.Lock()
+	q, exists := b.messageQueues[sessionName]
+	if !exists {
+		q = make(chan string, 100) // buffer up to 100 queued messages
+		b.messageQueues[sessionName] = q
+		go b.drainQueue(sessionName, q)
+	}
+	b.mqMu.Unlock()
+
+	select {
+	case q <- prompt:
+		slog.Info("message queued", "session", sessionName, "queue_depth", len(q))
+	default:
+		slog.Warn("message queue full, dropping message", "session", sessionName)
+		b.broadcastFiltered(MsgSessionError, ErrorPayload{
+			SessionName: sessionName,
+			Message:     "Message queue full. Try again later.",
+		}, sessionName)
+	}
+}
+
+// drainQueue processes queued messages for a session sequentially.
+// Runs on the server context so it survives client disconnects.
+func (b *Bridge) drainQueue(sessionName string, q chan string) {
+	for {
+		select {
+		case <-b.serverCtx.Done():
+			return
+		case prompt, ok := <-q:
+			if !ok {
+				return
+			}
+			if err := b.manager.SendPrompt(b.serverCtx, sessionName, prompt); err != nil {
+				slog.Warn("queued prompt failed", "session", sessionName, "error", err)
+				b.broadcastFiltered(MsgSessionError, ErrorPayload{
+					SessionName: sessionName,
+					Message:     err.Error(),
+				}, sessionName)
+				b.broadcastSessionsList()
+			}
+		}
+	}
 }
 
 // SendWorktreesTo sends the worktrees list to a single client.

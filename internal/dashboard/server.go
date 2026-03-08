@@ -61,7 +61,7 @@ func NewServer(cfg *config.Config) *Server {
 	if ownerNick == "" {
 		ownerNick = "owner"
 	}
-	bridge := NewBridge(mgr, ownerNick)
+	bridge := NewBridge(mgr, ownerNick, context.Background()) // serverCtx set in Start()
 	tmgr := tunnel.NewManagerWithConfig(tunnel.Config{
 		TunnelID:    cfg.Dashboard.TunnelID,
 		Access:      cfg.Dashboard.TunnelAccess,
@@ -208,6 +208,9 @@ func (s *Server) SetUpgradeHandler(fn func() error) {
 
 // Start initializes the copilot manager and starts the HTTP server.
 func (s *Server) Start(ctx context.Context, port int) error {
+	// Set the server context on the bridge for queue workers.
+	s.bridge.serverCtx = ctx
+
 	// Start the copilot SDK client.
 	if err := s.manager.Start(ctx); err != nil {
 		return fmt.Errorf("starting copilot manager: %w", err)

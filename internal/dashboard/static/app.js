@@ -198,16 +198,24 @@ function handleSessionHistory(payload) {
     const container = document.getElementById('chat-messages');
     const messages = (payload.messages || []).filter(msg => msg.content && msg.content.trim());
 
-    // Clean up any pending message placeholder.
-    const pending = document.getElementById('pending-message');
-    if (pending) pending.remove();
-
     // Full refresh: clear and re-render canonical history.
-    // Preserve scroll position if user is scrolled up.
     const wasAtBottom = !state.userScrolledUp;
     container.innerHTML = '';
     messages.forEach(msg => appendChatMessage(msg.role, msg.content, false));
     state.renderedMessageCount = messages.length;
+
+    // Re-add pending messages that haven't appeared in history yet.
+    if (state.pendingPrompt) {
+        const alreadyInHistory = messages.some(m => m.role === 'user' && m.content === state.pendingPrompt);
+        if (alreadyInHistory) {
+            state.pendingPrompt = null;
+        } else {
+            const s = state.sessions.find(s => s.name === state.activeSession);
+            const isQueued = s && s.is_processing;
+            appendPendingMessage(state.pendingPrompt, isQueued);
+        }
+    }
+
     if (wasAtBottom) {
         state.userScrolledUp = false;
         const el = document.getElementById('chat-messages');
@@ -376,11 +384,12 @@ function handleReasoningDelta(payload) {
 function handleUserMessage(payload) {
     if (payload.session_name !== state.activeSession) return;
 
-    // Check if there's a pending message placeholder to replace.
-    const pending = document.getElementById('pending-message');
-    if (pending) {
-        pending.remove();
+    // Check if this message matches a pending prompt.
+    if (state.pendingPrompt && payload.content === state.pendingPrompt) {
+        state.pendingPrompt = null;
     }
+    const pending = document.getElementById('pending-message');
+    if (pending) pending.remove();
 
     appendChatMessage('user', payload.content, false);
     state.renderedMessageCount++;
@@ -1799,7 +1808,6 @@ function sendMessage() {
         const sessionId = state._viewingSession;
         state._viewingSession = null;
         state._pendingResume = null;
-        // Resume via SDK, then send the message.
         const displayName = document.getElementById('chat-session-name').textContent;
         const name = displayName.length > 40 ? displayName.substring(0, 37) + '...' : displayName;
         state._pendingResumePrompt = prompt;
@@ -1816,23 +1824,66 @@ function sendMessage() {
     }
 
     if (!state.activeSession) return;
-    // Clear error state so the session can recover on retry.
     const s = state.sessions.find(s => s.name === state.activeSession);
+
+    // If the LLM is currently processing, show interrupt/queue choice.
+    if (s && s.is_processing) {
+        showInterruptQueueChoice(prompt);
+        return;
+    }
+
+    // Clear error state so the session can recover on retry.
     if (s && s.state === 'error') {
         updateSessionState(state.activeSession, 'processing');
         showActivity(true);
         updateActivity('💭 Thinking...');
     }
+    doSendMessage(prompt);
+}
+
+function doSendMessage(prompt) {
     send('send_message', { session_name: state.activeSession, prompt });
-
-    // Show an optimistic pending bubble so the user gets immediate feedback.
     state.pendingPrompt = prompt;
-    const isQueued = s && s.is_processing;
-    appendPendingMessage(prompt, isQueued);
+    appendPendingMessage(prompt, false);
 
+    const input = document.getElementById('chat-input');
     input.value = '';
     input.style.height = 'auto';
     document.getElementById('send-btn').disabled = true;
+}
+
+function showInterruptQueueChoice(prompt) {
+    var existing = document.getElementById('send-choice');
+    if (existing) existing.remove();
+
+    var div = document.createElement('div');
+    div.id = 'send-choice';
+    div.className = 'send-choice';
+    div.innerHTML = '<div class="send-choice-text">LLM is working. How should this message be sent?</div>' +
+        '<div class="send-choice-buttons">' +
+        '<button class="btn btn-sm" id="choice-queue">⏳ Queue</button>' +
+        '<button class="btn btn-sm btn-danger" id="choice-interrupt">⚡ Interrupt</button>' +
+        '<button class="btn btn-sm" id="choice-cancel">Cancel</button>' +
+        '</div>';
+    document.getElementById('chat-input-area').before(div);
+
+    document.getElementById('choice-queue').onclick = function() {
+        div.remove();
+        state.pendingPrompt = prompt;
+        appendPendingMessage(prompt, true);
+        send('send_message', { session_name: state.activeSession, prompt });
+        document.getElementById('chat-input').value = '';
+        document.getElementById('chat-input').style.height = 'auto';
+        document.getElementById('send-btn').disabled = true;
+    };
+    document.getElementById('choice-interrupt').onclick = function() {
+        div.remove();
+        send('abort_session', { session_name: state.activeSession });
+        setTimeout(function() { doSendMessage(prompt); }, 500);
+    };
+    document.getElementById('choice-cancel').onclick = function() {
+        div.remove();
+    };
 }
 
 function appendPendingMessage(content, queued) {

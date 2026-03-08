@@ -110,6 +110,7 @@ const (
 	MsgUpgradeServer        = "upgrade_server"
 	MsgWatchSession         = "watch_session"
 	MsgForkSession          = "fork_session"
+	MsgAbortSession         = "abort_session"
 )
 
 // Server → Client

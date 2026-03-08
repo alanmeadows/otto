@@ -103,6 +103,11 @@ func (s *Session) Destroy() {
 	}
 }
 
+// Abort cancels the current in-flight request.
+func (s *Session) Abort(ctx context.Context) error {
+	return s.session.Abort(ctx)
+}
+
 // handleSDKEvent dispatches SDK events to our event model.
 func (s *Session) handleSDKEvent(evt sdk.SessionEvent) {
 	s.mu.Lock()

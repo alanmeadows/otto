@@ -355,6 +355,24 @@ body {
     animation: pulse 1.5s infinite;
 }
 
+/* Interrupt/Queue choice bar */
+.send-choice {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 16px;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border);
+}
+.send-choice-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+.send-choice-buttons {
+    display: flex;
+    gap: 6px;
+}
+
 /* Sender label for multi-user sessions */
 .message-sender {
     font-size: 11px;

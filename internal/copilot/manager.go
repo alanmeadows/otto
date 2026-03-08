@@ -360,6 +360,15 @@ func (m *Manager) SendPrompt(ctx context.Context, name, prompt string) error {
 	return s.SendPrompt(ctx, prompt)
 }
 
+// AbortSession cancels the current in-flight request for a session.
+func (m *Manager) AbortSession(ctx context.Context, name string) error {
+	s := m.GetSession(name)
+	if s == nil {
+		return fmt.Errorf("session %q not found", name)
+	}
+	return s.Abort(ctx)
+}
+
 // emitSystemInfo sends an informational event to the dashboard for a session.
 func (m *Manager) emitSystemInfo(sessionName, message string) {
 	if m.onEvent != nil {

@@ -194,6 +194,21 @@ func (b *Bridge) handleClientMessage(ctx context.Context, client *wsClient, msg 
 			}
 		}()
 
+	case MsgAbortSession:
+		var p struct {
+			SessionName string `json:"session_name"`
+		}
+		if err := json.Unmarshal(msg.Payload, &p); err != nil {
+			return
+		}
+		go func() {
+			if err := b.manager.AbortSession(ctx, p.SessionName); err != nil {
+				slog.Warn("abort session failed", "session", p.SessionName, "error", err)
+			} else {
+				slog.Info("session aborted by user", "session", p.SessionName)
+			}
+		}()
+
 	case MsgCreateSession:
 		var p CreateSessionPayload
 		if err := json.Unmarshal(msg.Payload, &p); err != nil {

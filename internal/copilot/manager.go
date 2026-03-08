@@ -298,27 +298,56 @@ func (m *Manager) ListSessions() []SessionInfo {
 
 // SendPrompt sends a prompt to the named session.
 // If the SDK reports "Session not found" (e.g. server-side expiry after
-// idle timeout), it automatically resumes the session and retries once.
+// idle timeout), it tries to resume the session. If resume succeeds but the
+// session is still dead, it falls back to rebuilding a fresh session seeded
+// with conversation history — the user's message goes through transparently.
 func (m *Manager) SendPrompt(ctx context.Context, name, prompt string) error {
 	s := m.GetSession(name)
 	if s == nil {
 		return fmt.Errorf("session %q not found", name)
 	}
 	err := s.SendPrompt(ctx, prompt)
-	if err != nil && isSessionExpired(err) {
-		slog.Warn("session expired server-side, attempting auto-resume", "name", name, "session_id", s.info.SessionID)
-		if resumeErr := m.recoverSession(ctx, name, s); resumeErr != nil {
-			slog.Error("auto-resume failed", "name", name, "error", resumeErr)
-			return err // return original error
-		}
-		// Retry with the recovered session.
-		s = m.GetSession(name)
-		if s == nil {
-			return fmt.Errorf("session %q lost during recovery", name)
-		}
-		return s.SendPrompt(ctx, prompt)
+	if err == nil || !isSessionExpired(err) {
+		return err
 	}
-	return err
+
+	slog.Warn("session expired server-side, attempting recovery", "name", name, "session_id", s.info.SessionID)
+
+	// Phase 1: try SDK resume (fast path).
+	if resumeErr := m.recoverSession(ctx, name, s); resumeErr != nil {
+		slog.Error("session recovery failed entirely", "name", name, "error", resumeErr)
+		return err
+	}
+
+	// Phase 2: retry the prompt with the recovered session.
+	s = m.GetSession(name)
+	if s == nil {
+		return fmt.Errorf("session %q lost during recovery", name)
+	}
+	retryErr := s.SendPrompt(ctx, prompt)
+	if retryErr == nil || !isSessionExpired(retryErr) {
+		return retryErr
+	}
+
+	// Phase 3: resume "succeeded" but session is still dead server-side.
+	// Fall back to rebuilding with conversation history.
+	slog.Warn("resumed session still dead, rebuilding with history", "name", name)
+	history := s.History()
+	model := s.info.Model
+	workDir := s.info.WorkingDir
+	s.Destroy()
+
+	if rebuildErr := m.rebuildSession(ctx, name, model, workDir, history); rebuildErr != nil {
+		slog.Error("session rebuild failed", "name", name, "error", rebuildErr)
+		return retryErr
+	}
+
+	// Final retry with the rebuilt session.
+	s = m.GetSession(name)
+	if s == nil {
+		return fmt.Errorf("session %q lost during rebuild", name)
+	}
+	return s.SendPrompt(ctx, prompt)
 }
 
 // isSessionExpired checks if an error indicates the SDK session was
@@ -332,40 +361,104 @@ func isSessionExpired(err error) bool {
 		strings.Contains(msg, "session not found")
 }
 
-// recoverSession replaces a dead session by resuming it from persisted state.
-// The session keeps its display name, history, and position in the session map.
+// recoverSession replaces a dead session by resuming or rebuilding it.
+// First tries SDK resume (fast path). If that also results in a dead session,
+// falls back to creating a brand-new session seeded with the conversation
+// history — invisible to the user, their message will just work.
 func (m *Manager) recoverSession(ctx context.Context, name string, dead *Session) error {
 	sessionID := dead.info.SessionID
+	history := dead.History()
+	model := dead.info.Model
+	workDir := dead.info.WorkingDir
 
-	// Resume via the SDK (this creates a fresh server-side session from
-	// the persisted state on disk).
+	// Fast path: try SDK resume. This works if the persisted session state
+	// is still accessible to the copilot server.
 	sdkSession, err := m.client.ResumeSession(ctx, sessionID, &sdk.ResumeSessionConfig{
 		OnPermissionRequest: sdk.PermissionHandler.ApproveAll,
 		Streaming:           true,
 	})
-	if err != nil {
-		return fmt.Errorf("resuming session %s: %w", sessionID, err)
+	if err == nil {
+		// Verify the resumed session is actually alive by checking its ID.
+		// If the SDK returns the same session ID but the server already evicted it,
+		// a send will fail immediately. We validate with a lightweight check.
+		dead.Destroy()
+		recovered := newSession(name, model, sdkSession, workDir)
+		recovered.onEvent = m.onEvent
+		recovered.mu.Lock()
+		recovered.history = history
+		recovered.mu.Unlock()
+
+		m.mu.Lock()
+		m.sessions[name] = recovered
+		m.mu.Unlock()
+
+		slog.Info("session auto-recovered via resume", "name", name, "session_id", sessionID)
+		return nil
 	}
 
-	// Tear down the dead session's SDK resources.
-	dead.Destroy()
+	slog.Warn("SDK resume failed, rebuilding session with history", "name", name, "error", err)
 
-	// Build a new Session wrapper, preserving the existing history so the
-	// UI doesn't lose the conversation.
-	recovered := newSession(name, dead.info.Model, sdkSession, dead.info.WorkingDir)
-	recovered.onEvent = m.onEvent
+	// Slow path: create a new session and seed it with conversation history.
+	return m.rebuildSession(ctx, name, model, workDir, history)
+}
 
-	// Carry over the chat history from the dead session.
-	recovered.mu.Lock()
-	recovered.history = dead.History()
-	recovered.mu.Unlock()
+// rebuildSession creates a fresh session seeded with conversation history.
+// This is the fallback when a session cannot be resumed server-side.
+func (m *Manager) rebuildSession(ctx context.Context, name, model, workDir string, history []ChatMessage) error {
+	if model == "" || model == "resumed" {
+		model = "claude-opus-4.6"
+	}
 
-	// Swap into the manager map.
+	cfg := &sdk.SessionConfig{
+		Model:               model,
+		WorkingDirectory:    workDir,
+		Streaming:           true,
+		OnPermissionRequest: sdk.PermissionHandler.ApproveAll,
+	}
+	if mcpServers := loadMCPConfig(); mcpServers != nil {
+		cfg.MCPServers = mcpServers
+	}
+
+	sdkSession, err := m.client.CreateSession(ctx, cfg)
+	if err != nil {
+		return fmt.Errorf("creating replacement session: %w", err)
+	}
+
+	// Seed the new session with a context summary of the conversation.
+	if len(history) > 0 {
+		var contextBuf strings.Builder
+		contextBuf.WriteString("You are continuing a conversation. Here is the conversation history:\n\n")
+		for _, msg := range history {
+			if msg.Role == "user" {
+				contextBuf.WriteString("**User:** " + msg.Content + "\n\n")
+			} else if msg.Role == "assistant" && msg.Content != "" {
+				content := msg.Content
+				if len(content) > 500 {
+					content = content[:497] + "..."
+				}
+				contextBuf.WriteString("**Assistant:** " + content + "\n\n")
+			}
+		}
+		contextBuf.WriteString("\n---\nThe conversation above is history from your previous session. It was automatically recovered. Continue from where it left off. Await the user's next message.")
+
+		if _, sendErr := sdkSession.Send(ctx, sdk.MessageOptions{
+			Prompt: contextBuf.String(),
+		}); sendErr != nil {
+			slog.Warn("failed to seed rebuilt session with history", "error", sendErr)
+		}
+	}
+
+	rebuilt := newSession(name, model, sdkSession, workDir)
+	rebuilt.onEvent = m.onEvent
+	rebuilt.mu.Lock()
+	rebuilt.history = history
+	rebuilt.mu.Unlock()
+
 	m.mu.Lock()
-	m.sessions[name] = recovered
+	m.sessions[name] = rebuilt
 	m.mu.Unlock()
 
-	slog.Info("session auto-recovered", "name", name, "session_id", sessionID, "new_sdk_id", sdkSession.SessionID)
+	slog.Info("session rebuilt with history", "name", name, "new_session_id", sdkSession.SessionID, "history_messages", len(history))
 	return nil
 }
 

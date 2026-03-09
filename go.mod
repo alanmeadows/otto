@@ -5,7 +5,7 @@ go 1.25.6
 require (
 	dario.cat/mergo v1.0.2
 	github.com/adrg/frontmatter v0.2.0
-	github.com/charmbracelet/huh v0.8.0
+	github.com/charmbracelet/huh v1.0.0
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/log v0.4.2
 	github.com/coder/websocket v1.8.14

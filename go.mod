@@ -16,7 +16,7 @@ require (
 	github.com/shurcooL/githubv4 v0.0.0-20260209031235-2402fdf4a9ed
 	github.com/spf13/cobra v1.10.2
 	github.com/stretchr/testify v1.11.1
-	github.com/tidwall/jsonc v0.3.2
+	github.com/tidwall/jsonc v0.3.3
 	github.com/tidwall/sjson v1.2.5
 	go.uber.org/mock v0.6.0
 	golang.org/x/oauth2 v0.36.0

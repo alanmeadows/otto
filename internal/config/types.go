@@ -150,9 +150,18 @@ func DefaultConfig() Config {
 		},
 		Dashboard: DashboardConfig{
 			Port:            4098,
+			TunnelID:        defaultTunnelID(),
 			Enabled:         true,
 			AutoStartTunnel: true,
 			OwnerNickname:   "owner",
 		},
 	}
+}
+
+// defaultTunnelID returns a sensible tunnel name derived from $USER.
+func defaultTunnelID() string {
+	if u := os.Getenv("USER"); u != "" {
+		return u + "-otto"
+	}
+	return ""
 }

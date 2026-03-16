@@ -94,7 +94,8 @@ func NewServer(cfg *config.Config) *Server {
 			}
 			slog.Info("tunnel connected, dashboard available remotely", "url", url)
 		}
-		bridge.BroadcastTunnelStatus(running, url, keyedURL)
+		p := TunnelStatusPayload{Running: running, URL: url, KeyedURL: keyedURL, Hint: tmgr.StatusHint()}
+		bridge.broadcast(MsgTunnelStatus, p)
 	})
 
 	// Wire tunnel and worktree commands from WebSocket to server.
@@ -183,7 +184,7 @@ func NewServer(cfg *config.Config) *Server {
 
 	bridge.onGetTunnelStatus = func() TunnelStatusPayload {
 		running, url := tmgr.Status()
-		p := TunnelStatusPayload{Running: running, URL: url}
+		p := TunnelStatusPayload{Running: running, URL: url, Hint: tmgr.StatusHint()}
 		if running && url != "" {
 			p.KeyedURL = url + "?key=" + dashKey
 		}

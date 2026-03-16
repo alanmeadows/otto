@@ -861,6 +861,7 @@ function handleTunnelStatus(payload) {
     state.tunnelRunning = payload.running;
     state.tunnelURL = payload.url || '';
     state.tunnelKeyedURL = payload.keyed_url || '';
+    state.tunnelHint = payload.hint || '';
     renderTunnelStatus();
 }
 
@@ -869,6 +870,7 @@ function renderTunnelStatus() {
     const inactiveEl = document.getElementById('tunnel-inactive');
     const badge = document.getElementById('tunnel-status');
     const qrEl = document.getElementById('tunnel-qr');
+    const hintEl = document.getElementById('tunnel-hint');
 
     if (state.tunnelRunning && state.tunnelURL) {
         activeEl.classList.remove('hidden');
@@ -889,6 +891,9 @@ function renderTunnelStatus() {
         inactiveEl.classList.remove('hidden');
         badge.classList.add('hidden');
         if (qrEl) qrEl.innerHTML = '';
+        if (hintEl && state.tunnelHint) {
+            hintEl.innerHTML = escapeHtml(state.tunnelHint);
+        }
     }
 }
 

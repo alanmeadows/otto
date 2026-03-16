@@ -62,6 +62,7 @@ mu             sync.Mutex
 url            string
 running        bool
 port           int
+statusHint     string // human-readable reason when tunnel is not active
 onStatusChange func(running bool, url string)
 config         Config
 }
@@ -117,7 +118,10 @@ return nil
 }
 
 // Create tunnel (idempotent — fails silently if exists).
-runCmd(findDevtunnel(), "create", tid)
+// This is the first devtunnel CLI call and will surface auth/connectivity issues.
+if err := runCmdErr(findDevtunnel(), "create", tid); err != nil {
+	return fmt.Errorf("devtunnel create: %w", err)
+}
 
 // Create port (idempotent).
 runCmd(findDevtunnel(), "port", "create", tid, "-p", fmt.Sprintf("%d", port))
@@ -157,14 +161,23 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 
 	if !hasBgtask() {
 		slog.Warn("tunnel skipped: bgtask is not installed. Install with: go install github.com/philsphicas/bgtask/cmd/bgtask@latest")
+		m.mu.Lock()
+		m.statusHint = "bgtask is not installed"
+		m.mu.Unlock()
 		return nil
 	}
 	if !m.IsInstalled() {
 		slog.Warn("tunnel skipped: devtunnel is not installed. Install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+		m.mu.Lock()
+		m.statusHint = "devtunnel is not installed"
+		m.mu.Unlock()
 		return nil
 	}
 	if m.config.TunnelID == "" {
 		slog.Warn("tunnel skipped: no tunnel_id configured")
+		m.mu.Lock()
+		m.statusHint = "Configure tunnel_id in otto.jsonc"
+		m.mu.Unlock()
 		return nil
 	}
 
@@ -176,6 +189,7 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 			m.running = true
 			m.url = url
 			m.port = port
+			m.statusHint = ""
 			cb := m.onStatusChange
 			m.mu.Unlock()
 
@@ -194,6 +208,9 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 
 	// Ensure persistent tunnel exists with correct access config.
 	if err := m.ensurePersistentTunnel(port); err != nil {
+		m.mu.Lock()
+		m.statusHint = "devtunnel not responding — try: devtunnel user login"
+		m.mu.Unlock()
 		return fmt.Errorf("setting up persistent tunnel: %w", err)
 	}
 
@@ -282,6 +299,7 @@ func (m *Manager) pollBgtaskURL() {
 		if url := m.discoverBgtaskURL(); url != "" {
 			m.mu.Lock()
 			m.url = url
+			m.statusHint = ""
 			cb := m.onStatusChange
 			m.mu.Unlock()
 
@@ -293,6 +311,14 @@ func (m *Manager) pollBgtaskURL() {
 		}
 	}
 	slog.Warn("timed out waiting for bgtask tunnel URL")
+	m.mu.Lock()
+	m.statusHint = "Tunnel started but failed to connect — check devtunnel auth"
+	m.running = false
+	cb := m.onStatusChange
+	m.mu.Unlock()
+	if cb != nil {
+		cb(false, "")
+	}
 }
 
 // Stop terminates the bgtask-managed tunnel.
@@ -330,6 +356,13 @@ defer m.mu.Unlock()
 return m.running, m.url
 }
 
+// StatusHint returns a human-readable hint about why the tunnel is not active.
+func (m *Manager) StatusHint() string {
+m.mu.Lock()
+defer m.mu.Unlock()
+return m.statusHint
+}
+
 // URL returns the current tunnel URL, or empty string if not running.
 func (m *Manager) URL() string {
 m.mu.Lock()
@@ -338,11 +371,29 @@ return m.url
 }
 
 func runCmd(name string, args ...string) {
-cmd := exec.Command(name, args...)
-out, err := cmd.CombinedOutput()
-if err != nil {
-slog.Debug("tunnel setup command", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Debug("tunnel setup command", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
+	}
 }
+
+// runCmdErr is like runCmd but returns the error so callers can detect failures.
+func runCmdErr(name string, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		slog.Debug("tunnel setup command failed", "cmd", append([]string{name}, args...), "output", strings.TrimSpace(string(out)), "error", err)
+		if ctx.Err() == context.DeadlineExceeded {
+			return fmt.Errorf("command timed out (try: devtunnel user login)")
+		}
+		return fmt.Errorf("%s: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 // isTunnelConnected checks whether the tunnel has an active host connection

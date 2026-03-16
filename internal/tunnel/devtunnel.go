@@ -117,10 +117,13 @@ if tid == "" {
 return nil
 }
 
-// Create tunnel (idempotent — fails silently if exists).
+// Create tunnel — ignore "Conflict" errors meaning it already exists.
 // This is the first devtunnel CLI call and will surface auth/connectivity issues.
 if err := runCmdErr(findDevtunnel(), "create", tid); err != nil {
-	return fmt.Errorf("devtunnel create: %w", err)
+	if !strings.Contains(err.Error(), "Conflict") {
+		return fmt.Errorf("devtunnel create: %w", err)
+	}
+	slog.Debug("tunnel already exists, reusing", "tunnel_id", tid)
 }
 
 // Create port (idempotent).

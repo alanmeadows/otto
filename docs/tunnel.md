@@ -20,6 +20,11 @@ devtunnel user login -e
 devtunnel user login -g
 ```
 
+> **WSL note:** Otto prefers `devtunnel.exe` over `devtunnel` if found on your PATH. After installing via winget, you may need to add the WinGet links directory to your WSL PATH. Add this to `~/.bashrc` and re-login:
+> ```bash
+> export PATH="/mnt/c/Users/<your-windows-user>/AppData/Local/Microsoft/WinGet/Links:$PATH"
+> ```
+
 The authentication provider you choose here determines how tunnel visitors authenticate. Use `-e` for Entra if you want Microsoft/AAD login, `-g` for GitHub login.
 
 ## Quick Start

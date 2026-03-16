@@ -62,7 +62,7 @@ make install      # installs to ~/.local/bin
 
 - **GitHub Copilot CLI** — `npm install -g @github/copilot`
 - **bgtask** (required for tunnel management) — `go install github.com/philsphicas/bgtask/cmd/bgtask@latest`
-- **devtunnel** (optional, for remote access) — install in WSL (`curl -sL https://aka.ms/DevTunnelCliInstall | bash`) or on Windows (`winget install Microsoft.devtunnel`); both `devtunnel` and `devtunnel.exe` are supported
+- **devtunnel** (optional, for remote access) — `winget install Microsoft.devtunnel`; both `devtunnel.exe` and the Linux `devtunnel` binary are supported
 
 ## Quick Start
 
@@ -218,10 +218,7 @@ To access the dashboard from your phone, use Azure DevTunnels:
 
 ```bash
 # One-time setup: install devtunnel and login
-# Linux/WSL:
-curl -sL https://aka.ms/DevTunnelCliInstall | bash
-# Windows (devtunnel.exe is also supported from WSL):
-# winget install Microsoft.devtunnel
+winget install Microsoft.devtunnel
 devtunnel user login -e   # Entra ID (Microsoft), or -g for GitHub
 ```
 

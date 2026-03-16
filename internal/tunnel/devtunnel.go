@@ -28,7 +28,7 @@ func findDevtunnel() string {
 	if devtunnelBin != "" {
 		return devtunnelBin
 	}
-	for _, name := range []string{"devtunnel", "devtunnel.exe"} {
+	for _, name := range []string{"devtunnel.exe", "devtunnel"} {
 		if p, err := exec.LookPath(name); err == nil {
 			devtunnelBin = p
 			return p
@@ -167,7 +167,7 @@ func (m *Manager) Start(ctx context.Context, port int) error {
 		return nil
 	}
 	if !m.IsInstalled() {
-		slog.Warn("tunnel skipped: devtunnel is not installed. Install with: curl -sL https://aka.ms/DevTunnelCliInstall | bash (or on Windows: winget install Microsoft.devtunnel)")
+		slog.Warn("tunnel skipped: devtunnel is not installed. Install with: winget install Microsoft.devtunnel")
 		m.mu.Lock()
 		m.statusHint = "devtunnel is not installed"
 		m.mu.Unlock()

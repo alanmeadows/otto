@@ -7,8 +7,8 @@ Otto's dashboard can be exposed securely over the internet using [Azure DevTunne
 Install the DevTunnel CLI and authenticate:
 
 ```bash
-# Install
-curl -sL https://aka.ms/DevTunnelCliInstall | bash
+# Install (via winget on Windows — also available from WSL)
+winget install Microsoft.devtunnel
 
 # Login with Entra ID (Microsoft account) — recommended
 devtunnel user login -e
